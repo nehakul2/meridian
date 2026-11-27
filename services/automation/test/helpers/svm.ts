@@ -188,6 +188,12 @@ export class SvmEnv implements AccountReader, TxSender, PriceUpdatePoster {
       // Read the error from the logs first and touch the native error objects only when the
       // logs do not name it: on GitHub's runners, formatting a failed result (toString) aborted
       // the Vitest worker with std::bad_alloc.
+      const mode = process.env.SVM_ERR_MODE;
+      if (mode === "none") throw new ChainError("transaction failed (SVM_ERR_MODE=none)", false);
+      if (mode === "string") {
+        const text = res.toString();
+        throw parseProgramError(null, [text]) ?? new ChainError(`transaction failed: ${text}`, false);
+      }
       const logs = res.meta().logs();
       const fromLogs = parseProgramError(null, logs);
       if (fromLogs) throw fromLogs;
