@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { STREAM_KEY } from "../../shared/src/events.js";
 import { MemoryCursorStore } from "../src/cursor.js";
 import { Indexer } from "../src/indexer.js";
-import { K } from "../src/keys.js";
+import { K } from "../../shared/src/keys.js";
 import { LeaderLease } from "../src/leader.js";
 import { IndexerNode } from "../src/node.js";
 import { Projector } from "../src/projector.js";

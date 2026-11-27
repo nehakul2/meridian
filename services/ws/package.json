@@ -1,0 +1,26 @@
+{
+  "name": "@meridian/ws",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Meridian WS Gateway (C5): book snapshots plus seq-ordered deltas, trades, market status, underlying price and the authenticated user channel, fanned out from Redis pub/sub",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/ws/src/main.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.8.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

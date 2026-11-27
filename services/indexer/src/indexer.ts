@@ -11,7 +11,7 @@ import {
 import { consoleLogger, decodeTransaction, Logger, RawTx } from "./decoder.js";
 import type { CursorStore } from "./cursor.js";
 import { PROGRAM_ID } from "./idl.js";
-import { K } from "./keys.js";
+import { K } from "../../shared/src/keys.js";
 import type { Projector } from "./projector.js";
 import type { ChainSource } from "./source.js";
 import type { EventStream } from "./stream.js";

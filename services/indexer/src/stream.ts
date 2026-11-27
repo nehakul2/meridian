@@ -7,7 +7,7 @@
  */
 import type { Redis } from "ioredis";
 import { STREAM_KEY, STREAM_MAXLEN, StreamEntry, toFields } from "../../shared/src/events.js";
-import { K, TTL } from "./keys.js";
+import { K, TTL } from "../../shared/src/keys.js";
 
 const APPEND = `
 if ARGV[1] ~= '' and redis.call('GET', KEYS[3]) ~= ARGV[1] then

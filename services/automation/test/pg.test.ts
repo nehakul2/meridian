@@ -20,7 +20,7 @@ describe.skipIf(!db)("PgStore", () => {
   beforeAll(async () => {
     pool = new pg.Pool({ connectionString: (db as TestDb).url, max: 6 });
     await pool.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
-    expect(await migrate(pool, MIGRATIONS)).toEqual(["0001_init.sql", "0002_automation.sql"]);
+    expect(await migrate(pool, MIGRATIONS)).toEqual(["0001_init.sql", "0002_automation.sql", "0003_api.sql"]);
     expect(await migrate(pool, MIGRATIONS)).toEqual([]); // idempotent
     store = new PgStore(pool);
     await pool.query("INSERT INTO tickers (symbol, pyth_feed_id, liquidity_tier_override) VALUES ('META', decode(repeat('06',32),'hex'), 'A'), ('AAPL', decode(repeat('01',32),'hex'), NULL)");

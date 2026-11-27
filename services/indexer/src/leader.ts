@@ -5,7 +5,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { ChainableCommander, Redis } from "ioredis";
-import { K } from "./keys.js";
+import { K } from "../../shared/src/keys.js";
 import type { WriteGuard } from "./projector.js";
 import { NotLeaderError } from "./stream.js";
 
