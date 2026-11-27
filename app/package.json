@@ -1,0 +1,48 @@
+{
+  "name": "@meridian/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Meridian frontend (C2): Next.js static export, wallet adapter, SIWS, REST + WS clients",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "npx http-server out -p 3000 -s",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "stub": "tsx dev/stub-server.ts",
+    "e2e": "playwright test --trace retain-on-failure",
+    "screenshots": "SCREENSHOTS=1 playwright test e2e/screenshots.spec.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.13",
+    "@types/node": "^22.20.7",
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "http-server": "^14.1.1",
+    "jsdom": "^31.0.1",
+    "tsx": "^4.23.15",
+    "tweetnacl": "^1.0.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "ws": "^8.23.1"
+  },
+  "dependencies": {
+    "@solana/wallet-adapter-base": "^0.9.28",
+    "@solana/wallet-adapter-phantom": "^0.9.30",
+    "@solana/wallet-adapter-react": "^0.15.40",
+    "@solana/wallet-adapter-solflare": "^0.6.34",
+    "@solana/web3.js": "^1.99.0",
+    "bs58": "^6.0.0",
+    "next": "^15.5.29",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}
