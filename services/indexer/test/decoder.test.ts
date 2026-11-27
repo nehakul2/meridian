@@ -8,7 +8,7 @@ import { EVENT_KINDS, fromFields, STREAM_KEY } from "../../shared/src/events.js"
 import { MemoryCursorStore } from "../src/cursor.js";
 import { decodeTransaction, EVENT_IX_TAG_LE, RawTx } from "../src/decoder.js";
 import { CURSOR, Indexer } from "../src/indexer.js";
-import { K } from "../src/keys.js";
+import { K } from "../../shared/src/keys.js";
 import { Projector } from "../src/projector.js";
 import { EventStream } from "../src/stream.js";
 import { allEvents, FakeChain, fixture, nameOf, quiet, tx } from "./helpers/fixture.js";

@@ -7,7 +7,7 @@ import type { ChainEvent } from "../../shared/src/events.js";
 import { MemoryCursorStore } from "../src/cursor.js";
 import { decodeTransaction } from "../src/decoder.js";
 import { Indexer } from "../src/indexer.js";
-import { K } from "../src/keys.js";
+import { K } from "../../shared/src/keys.js";
 import { Projector } from "../src/projector.js";
 import { EventStream } from "../src/stream.js";
 import { allGroups, FakeChain, fixture, groupsThrough, quiet, tx } from "./helpers/fixture.js";
@@ -156,6 +156,42 @@ describe("projector", () => {
       const asks = [...lv].filter(([k]) => k[0] === "A").map(([k, q]) => [Number(k.slice(2)), q] as [number, number]).sort((a, b) => a[0] - b[0]);
       expect(key(bids.slice(0, 20), asks.slice(0, 20))).toBe(key(final.bids, final.asks));
     }
+  });
+
+  it("Phase 6: md:book:{m}:ord mirrors the resting orders and every book_delta names the snapshot seq it applies to", async () => {
+    if (!r) return;
+    const redis = r.client();
+    const sub = r.client();
+    const deltas: { seq: string; prev_seq: string }[] = [];
+    await sub.subscribe(K.ch.book(M));
+    sub.on("message", (_c, msg) => deltas.push(JSON.parse(msg)));
+    const p = new Projector(redis, { now: () => 1 });
+    const groups = allGroups();
+    const closeIdx = groups.findIndex((g) => g.some((e) => e.kind === "BookClosed" && e.payload.market === M));
+    let seenOrders = 0;
+    for (const [i, g] of groups.slice(0, closeIdx).entries()) {
+      await p.applyInstruction(g);
+      if (i % 5 !== 0) continue;
+      // The order index holds exactly the open orders of this market from every owner's md:oo.
+      const want: Record<string, unknown> = {};
+      for (const o of Object.values(U)) {
+        for (const [k, v] of Object.entries(await redis.hgetall(K.oo(o)))) {
+          if (!k.startsWith(`${M}:`)) continue;
+          const j = JSON.parse(v);
+          want[k.slice(M.length + 1)] = { owner: j.owner, side: j.side, price: j.price, qty: j.qty, tag: j.tag };
+        }
+      }
+      const got = Object.fromEntries(Object.entries(await redis.hgetall(K.ord(M))).map(([k, v]) => [k, JSON.parse(v)]));
+      expect(got).toEqual(want);
+      if (Object.keys(got).length > 0) seenOrders++;
+    }
+    expect(seenOrders).toBeGreaterThan(2);
+    await new Promise((res) => setTimeout(res, 50));
+    expect(deltas.length).toBeGreaterThan(5);
+    expect(deltas[0]!.prev_seq).toBe("0");
+    for (let i = 1; i < deltas.length; i++) expect(deltas[i]!.prev_seq).toBe(deltas[i - 1]!.seq);
+    await p.applyInstruction(groups[closeIdx]!);
+    expect(await redis.exists(K.ord(M))).toBe(0);
   });
 
   it("md:book:{m}:* and md:bbo are deleted on BookClosed", async () => {

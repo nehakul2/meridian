@@ -18,7 +18,7 @@ import {
 import {
   applyInstruction, avgNoCents, avgYesCents, BookSide, emptyPosition, MarketState, needs, OrderState, PositionState,
 } from "../../shared/src/positions.js";
-import { K, TTL } from "./keys.js";
+import { K, TTL } from "../../shared/src/keys.js";
 
 /** Runs a MULTI that only commits while this process holds the leader lease (MER-52). */
 export interface WriteGuard {
@@ -74,6 +74,11 @@ function orderJson(o: OrderState): string {
   });
 }
 
+/** `md:book:{m}:ord` value: what a taker needs to know about a resting order. */
+function ordJson(o: OrderState): string {
+  return JSON.stringify({ owner: o.owner, side: o.side, price: o.price, qty: Number(o.qtyOriginal - o.qtyFilled), tag: o.tag });
+}
+
 function orderFromJson(s: string): OrderState {
   const j = JSON.parse(s) as Record<string, string | number>;
   return {
@@ -119,7 +124,7 @@ export class Projector {
     await this.applyMarket(m, fresh, group);
   }
 
-  private async loadState(m: string, group: ChainEvent[]): Promise<{ state: MarketState; levels: Levels }> {
+  private async loadState(m: string, group: ChainEvent[]): Promise<{ state: MarketState; levels: Levels; prevBookSeq: string }> {
     const need = needs(group);
     const owners = [...need.owners];
     const state: MarketState = { orders: new Map(), positions: new Map() };
@@ -133,19 +138,22 @@ export class Projector {
     }
     for (const [id, o] of orderOwner) p.hget(K.oo(o), `${m}:${id}`);
     p.hgetall(K.lvl(m));
+    p.get(K.snap(m));
     const res = (await p.exec())!;
     owners.forEach((o, i) => state.positions.set(o, posFromJson(o, m, res[i]![1] as string | null)));
     orderOwner.forEach(([id], i) => {
       const s = res[owners.length + i]![1] as string | null;
       if (s) state.orders.set(id, orderFromJson(s));
     });
-    const lvl = res.at(-1)![1] as Record<string, string>;
+    const lvl = res.at(-2)![1] as Record<string, string>;
     const levels: Levels = new Map(Object.entries(lvl).map(([k, v]) => [k, BigInt(v)]));
-    return { state, levels };
+    const snap = res.at(-1)![1] as string | null;
+    const prevBookSeq = snap ? String((JSON.parse(snap) as { seq: string }).seq) : "0";
+    return { state, levels, prevBookSeq };
   }
 
   private async applyMarket(m: string, events: ChainEvent[], whole: ChainEvent[]): Promise<void> {
-    const { state, levels } = await this.loadState(m, whole);
+    const { state, levels, prevBookSeq } = await this.loadState(m, whole);
     const before = new Map(levels);
     // Intent mapping needs the whole instruction; apply only the fresh events.
     const applied = applyInstruction(state, events.length === whole.length ? whole : events);
@@ -256,7 +264,9 @@ export class Projector {
         if (ask) Object.assign(bbo, { ask: String(ask[0]), ask_qty: String(ask[1]), no_bid: String(100 - ask[0]) });
         if (bid && ask) bbo.mid = String((bid[0] + ask[0]) / 2);
         tx.hset(K.bbo(m), bbo);
-        tx.publish(K.ch.book(m), JSON.stringify({ type: "book_delta", seq: lastSeq.toString(), changes }));
+        // prev_seq = the seq of the snapshot this delta applies to, so a reader can tell a
+        // missed delta from a market event that did not touch the book (Phase 6, WS-02).
+        tx.publish(K.ch.book(m), JSON.stringify({ type: "book_delta", seq: lastSeq.toString(), prev_seq: prevBookSeq, changes }));
       }
 
       for (const f of applied.fills) {
@@ -272,8 +282,14 @@ export class Projector {
 
       for (const id of applied.orders) {
         const o = state.orders.get(id)!;
-        if (o.status === "OPEN" || o.status === "PARTIAL") tx.hset(K.oo(o.owner), `${m}:${id}`, orderJson(o));
-        else tx.hdel(K.oo(o.owner), `${m}:${id}`);
+        if (o.status === "OPEN" || o.status === "PARTIAL") {
+          tx.hset(K.oo(o.owner), `${m}:${id}`, orderJson(o));
+          // Per-book order index: the Tx Builder needs the makers in front of a taker (Phase 6).
+          if (!bookClosed) tx.hset(K.ord(m), id.toString(), ordJson(o));
+        } else {
+          tx.hdel(K.oo(o.owner), `${m}:${id}`);
+          tx.hdel(K.ord(m), id.toString());
+        }
         tx.publish(K.ch.user(o.owner), JSON.stringify({ type: "order", market: m, order_id: id.toString(), status: o.status, qty: Number(o.qtyOriginal - o.qtyFilled) }));
       }
 
@@ -286,7 +302,7 @@ export class Projector {
 
       for (const msg of statusMsgs) tx.publish(K.ch.market(m), JSON.stringify(msg));
       if (bookClosed) {
-        tx.del(K.bids(m), K.asks(m), K.lvl(m), K.snap(m), K.bbo(m));
+        tx.del(K.bids(m), K.asks(m), K.lvl(m), K.snap(m), K.bbo(m), K.ord(m));
         tx.hset(K.mkt(m), "book", "");
         tx.publish(K.ch.market(m), JSON.stringify({ type: "book_closed", seq: lastSeq.toString() }));
       }
@@ -383,9 +399,9 @@ export class Projector {
     const publish = now - (this.lastPx.get(ticker) ?? -Infinity) >= 250;
     if (publish) this.lastPx.set(ticker, now);
     await this.guard.exec(this.redis, (tx) => {
-      tx.hset(`md:px:${ticker}`, { price: px.price, conf: px.conf, publish_time: String(px.publishTime) });
-      tx.expire(`md:px:${ticker}`, 60);
-      if (publish) tx.publish(`md:ch:px:${ticker}`, JSON.stringify({ type: "underlying", price: px.price, conf: px.conf, publish_time: px.publishTime }));
+      tx.hset(K.px(ticker), { price: px.price, conf: px.conf, publish_time: String(px.publishTime) });
+      tx.expire(K.px(ticker), 60);
+      if (publish) tx.publish(K.ch.px(ticker), JSON.stringify({ type: "underlying", price: px.price, conf: px.conf, publish_time: px.publishTime }));
     });
     return publish;
   }
@@ -393,7 +409,7 @@ export class Projector {
   /** Wallet USDC balance → `md:bal:{o}:usdc` (1 d TTL) and a `balance` user message. */
   async applyBalance(owner: string, micro: bigint): Promise<void> {
     await this.guard.exec(this.redis, (tx) => {
-      tx.set(`md:bal:${owner}:usdc`, micro.toString(), "EX", 86_400);
+      tx.set(K.bal(owner), micro.toString(), "EX", 86_400);
       tx.publish(K.ch.user(owner), JSON.stringify({ type: "balance", usdc: micro.toString() }));
     });
   }
@@ -408,7 +424,7 @@ export class Projector {
     for (const g of groups) for (const o of needs(g).owners) owners.add(o);
     const ooKeys = await Promise.all([...owners].map(async (o) => [o, await this.redis.hkeys(K.oo(o))] as const));
     await this.guard.exec(this.redis, (tx) => {
-      tx.del(K.bids(m), K.asks(m), K.lvl(m), K.snap(m), K.bbo(m), K.trades(m));
+      tx.del(K.bids(m), K.asks(m), K.lvl(m), K.snap(m), K.bbo(m), K.trades(m), K.ord(m));
       tx.hset(K.mkt(m), { seq: "0", pairs_outstanding: "0", volume: "0", last_cents: "" });
       for (const o of owners) tx.hdel(K.pos(o), m);
       for (const [o, keys] of ooKeys) for (const k of keys) if (k.startsWith(`${m}:`)) tx.hdel(K.oo(o), k);
