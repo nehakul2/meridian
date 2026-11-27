@@ -1,0 +1,58 @@
+name: txb
+
+on:
+  pull_request:
+    paths: ["services/txb/**", "services/shared/**", "programs/**", ".github/workflows/txb.yml"]
+  push:
+    branches: [main]
+
+env:
+  SOLANA_VERSION: v2.3.13
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache Solana CLI and platform tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/solana-release
+            ~/.cache/solana
+          key: solana-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        run: |
+          if [ ! -x ~/solana-release/bin/cargo-build-sbf ]; then
+            curl -sSfL -o /tmp/solana.tar.bz2 "https://github.com/anza-xyz/agave/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+            tar xjf /tmp/solana.tar.bz2 -C ~
+          fi
+          echo "$HOME/solana-release/bin" >> "$GITHUB_PATH"
+      # Every built transaction is signed and executed on the real program in LiteSVM.
+      - run: make build
+      # Node 24: Node 20 and 22 abort inside V8's GC with LiteSVM on GitHub's runners (PR #6).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/txb/package-lock.json
+      - run: npm ci
+        working-directory: services/txb
+      - run: npm run typecheck
+        working-directory: services/txb
+      - name: Tests (intent map, aux routes on LiteSVM)
+        run: npx vitest run
+        working-directory: services/txb
+        env:
+          TEST_REDIS_URL: redis://localhost:6379
+          REQUIRE_PROGRAM: "1"
+          REQUIRE_REDIS: "1"

@@ -18,9 +18,9 @@ files, not in this repo. This repo follows their layout and naming: program test
 | 3 · Settlement, redeem, cleanup | MER-30 to MER-37 | Built: official close with the Pyth cross-check, admin override, dispute window, per-strike settle, redeem, void, prune (with the BUY_NO conversion) and close_book |
 | 4 · Automation service | MER-40 to MER-49 | Built: calendar, dynamic strikes and frozen inputs, Hermes client, morning job, settler (two-vendor official close), finalize / strike / prune / close-book cranks, scheduler with single-runner lock, nightly reconcile. MER-48 spike script written, not yet run |
 | 5 · Indexer and PG Writer | MER-50 to MER-54 | Built: event decoder, `md:events` stream, Redis projector (book, BBO with the No view, markets, trades, ticker-days, open orders, positions), leader lease with failover and backfill, PG Writer (idempotent consumer, seq gap backfill, reorg rebuild, candles), positions with intent mapping and average-cost P&L |
-| 6 · REST API, Tx Builder, WebSocket | MER-60 onwards | Next |
+| 6 · REST API, Tx Builder, WebSocket | MER-60 to MER-65 | Built: REST reads from Redis with rate limits, SIWS sign-in and `/v1/me`, Tx Builder (intent map, position guards, 500 cap, unsigned v0 txs for trade, cancel, mint, merge, withdraw, redeem, dispute), admin routes returning unsigned multisig txs with an audit log, WebSocket gateway (book snapshots and deltas, trades, prices, user channel) |
 
-See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md), [docs/phase4-coverage.md](docs/phase4-coverage.md) and [docs/phase5-coverage.md](docs/phase5-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 5 also list their contract changes and the choices made where the spec was silent.
+See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md), [docs/phase4-coverage.md](docs/phase4-coverage.md), [docs/phase5-coverage.md](docs/phase5-coverage.md) and [docs/phase6-coverage.md](docs/phase6-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 6 also list their contract changes and the choices made where the spec was silent.
 
 ## Quick start
 
@@ -77,6 +77,27 @@ node dist/pg-writer/src/main.js          # REDIS_URL, DATABASE_URL, MARKET_CREAT
 ```
 
 Code both services run (event types, the positions and P&L engine) is in `services/shared/src`.
+
+### REST API, Tx Builder and WebSocket gateway (Phase 6)
+
+Node 22 or later locally (CI uses 24). The API and gateway suites replay the recorded day through
+the real Indexer projector into Redis, so they need no program build. The Tx Builder suites sign
+every transaction they build and execute it against the real program in LiteSVM, so they need
+`make build`.
+
+```sh
+make api-test                            # typecheck + tests for services/api, services/txb, services/ws
+cd services/api && npm test              # reads, SIWS + /v1/me, admin routes and audit log (~5 s)
+node dist/api/src/main.js                # REDIS_URL, PG_URL, PG_READ_URL, JWT_SECRET, ADMIN_SIGNERS, ADMIN_AUTHORITY
+cd ../txb && npm test                    # intent map, guards, mint/merge/withdraw/redeem on LiteSVM (~20 s)
+node dist/txb/src/main.js                # REDIS_URL, RPC_URL, USDC_MINT, BOND_VAULT
+cd ../ws && npm test                     # gateway channels, gap recovery, slow consumers (~4 s)
+node dist/ws/src/main.js                 # REDIS_URL, JWT_SECRET
+```
+
+None of the three reads RPC on a request path: the API and gateway serve the `md:*` read model
+(Postgres only for history), and the Tx Builder takes its blockhash and lookup table from
+background caches. Each has a `Dockerfile` in its folder.
 
 ### Dependency pins
 

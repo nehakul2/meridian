@@ -4,7 +4,7 @@ ANCHOR_VERSION := 0.31.1
 PROGRAM_DIR    := programs/meridian
 IDL            := $(PROGRAM_DIR)/idl/meridian.json
 
-.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test
+.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test api-test
 
 doctor:
 	@./scripts/doctor.sh $(SOLANA_VERSION) $(ANCHOR_VERSION)
@@ -50,3 +50,9 @@ automation-build:
 data-test:
 	cd services/indexer && npm ci && npm run typecheck && npm test
 	cd services/pg-writer && npm ci && npm run typecheck && npm test
+
+# REST API, Tx Builder and WebSocket gateway (Phase 6). The Tx Builder suites execute on LiteSVM.
+api-test: build
+	cd services/api && npm ci && npm run typecheck && npm test
+	cd services/txb && npm ci && npm run typecheck && npm test
+	cd services/ws && npm ci && npm run typecheck && npm test
