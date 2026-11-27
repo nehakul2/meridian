@@ -11,9 +11,6 @@ env:
 
 jobs:
   test:
-    # Pinned: on the newer ubuntu-latest image (glibc 2.43) Node 22 aborted with std::bad_alloc
-    # inside V8's minor GC (PretenuringHandler rehash) during the LiteSVM suites. 24.04 is the
-    # image the suite is developed and passes on.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
@@ -44,37 +41,22 @@ jobs:
           echo "$HOME/solana-release/bin" >> "$GITHUB_PATH"
       # The LiteSVM suites run the real program, so build it first.
       - run: make build
+      # Node 24, not 22: on GitHub's runners Node 20 and 22 abort with std::bad_alloc inside
+      # V8's minor GC (PretenuringHandler) during the LiteSVM settler suite, on every image we
+      # tried; Node 24 passes. Probe results are in PR #6.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: services/automation/package-lock.json
       - run: npm ci
         working-directory: services/automation
       - run: npm run typecheck
         working-directory: services/automation
-      - name: Runner details
-        run: |
-          nproc; free -m; ulimit -a; cat /proc/sys/vm/overcommit_memory
-          grep -m1 "model name" /proc/cpuinfo; node -v
-      # One test file at a time with the verbose reporter, so a native crash in a worker
-      # names the file and test it happened in.
       - name: Tests (unit, Postgres, LiteSVM)
-        run: npx vitest run --no-file-parallelism --reporter=verbose
+        run: npx vitest run
         working-directory: services/automation
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           REQUIRE_PROGRAM: "1"
           REQUIRE_PG: "1"
-      # Diagnostics for the std::bad_alloc abort seen only on GitHub's runners: rerun the
-      # test it happens in under gdb and print the native stack. The job stays failed.
-      - name: Native backtrace of the crash (on failure)
-        if: failure()
-        working-directory: services/automation
-        env:
-          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-          REQUIRE_PROGRAM: "1"
-        run: |
-          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb)
-          gdb -batch -ex "set pagination off" -ex "handle SIGUSR1 SIGUSR2 SIGPIPE nostop noprint" -ex run -ex "bt 60" \
-            --args node node_modules/vitest/vitest.mjs run test/settler.test.ts --pool=threads -t "SJ-02" || true
