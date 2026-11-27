@@ -41,6 +41,8 @@ pub enum CancelReason {
     User,
     Prune,
     IocRemainder,
+    /// The taker met its own resting order; the resting order is cancelled (MER-20).
+    SelfTrade,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -77,6 +79,7 @@ pub struct OrderPlaced {
     pub qty: u64,
     pub tif: TimeInForce,
     pub tag: OrderTag,
+    pub client_id: u64,
 }
 
 #[event]
@@ -99,6 +102,11 @@ pub struct OrderCancelled {
     pub slot: u64,
     pub seq: u64,
     pub order_id: u64,
+    pub owner: Pubkey,
+    pub side: Side,
+    pub price: u8,
+    /// Quantity removed from the book (the unfilled remainder).
+    pub qty: u64,
     pub reason: CancelReason,
 }
 
@@ -223,6 +231,16 @@ pub struct Unpaused {
     pub slot: u64,
     pub seq: u64,
     pub by: Pubkey,
+}
+
+/// Accrued taker fees moved from a market's quote vault to `Config.fee_vault` (MER-25).
+#[event]
+pub struct FeesSwept {
+    pub market: Pubkey,
+    pub slot: u64,
+    pub seq: u64,
+    pub amount: u64,
+    pub fee_vault: Pubkey,
 }
 
 #[event]

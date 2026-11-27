@@ -171,15 +171,68 @@ impl Market {
     }
 }
 
-/// Order book header. Price-level storage is defined by MER-20 (Phase 2),
-/// which grows this account; Phase 1 creates the PDA so the address is fixed.
-#[account]
-#[derive(InitSpace, Debug)]
+/// One resting order (56 bytes).
+#[zero_copy]
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct BookOrder {
+    pub owner: Pubkey,
+    pub order_id: u64,
+    /// Remaining (unfilled) quantity.
+    pub qty: u64,
+    /// `ORDER_TAG_*`.
+    pub tag: u8,
+    pub _pad: [u8; 7],
+}
+
+/// One price level: orders in time priority, oldest first (FIFO). Fills take from the
+/// front; a cancel removes its order and closes the gap, so the order stays FIFO.
+#[zero_copy]
+#[derive(Debug, Default)]
+pub struct Level {
+    pub len: u8,
+    pub _pad: [u8; 7],
+    pub orders: [BookOrder; 8],
+}
+
+pub const SIDE_BID: usize = 0;
+pub const SIDE_ASK: usize = 1;
+pub const ORDER_TAG_NONE: u8 = 0;
+pub const ORDER_TAG_BUY_NO: u8 = 1;
+
+/// Zero-copy order book (MER-20, spec 4.1): 99 Yes price levels per side.
+/// `levels[side * 99 + price - 1]`, side 0 = bids, 1 = asks.
+///
+/// The `total_*` fields are the sums of every `UserLedger` of this market, so the book
+/// escrow invariant (spec 4.3 #7) is checked on-chain without reading every ledger:
+/// `base_vault >= total_locked_yes + total_free_yes` and
+/// `quote_vault >= total_locked_usdc + total_free_usdc + fees_accrued`.
+#[account(zero_copy)]
+#[derive(Debug)]
 pub struct OrderBook {
     pub market: Pubkey,
+    /// Yes escrow (SPL token account, authority = Market PDA).
+    pub base_vault: Pubkey,
+    /// USDC escrow (SPL token account, authority = Market PDA).
+    pub quote_vault: Pubkey,
     pub next_order_id: u64,
+    pub total_locked_usdc: u64,
+    pub total_free_usdc: u64,
+    pub total_locked_yes: u64,
+    pub total_free_yes: u64,
+    /// Taker fees held in the quote vault until `sweep_fees` (MER-25).
+    pub fees_accrued: u64,
     pub order_count: u32,
     pub bump: u8,
+    pub _pad: [u8; 3],
+    pub levels: [Level; 198],
+}
+
+// Literal array lengths keep the IDL simple; these tie them to the constants.
+const _: () = assert!(LEVEL_CAPACITY == 8 && 2 * PRICE_LEVELS == 198);
+
+impl OrderBook {
+    /// Account size including the 8-byte discriminator.
+    pub const LEN: usize = 8 + core::mem::size_of::<OrderBook>();
 }
 
 /// Maker proceeds and locked balances per (market, owner) (spec 4.1, R4.6). Used from Phase 2.

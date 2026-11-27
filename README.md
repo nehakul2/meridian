@@ -14,9 +14,10 @@ files, not in this repo. This repo follows their layout and naming: program test
 | Phase | Tasks | State |
 |---|---|---|
 | 1 · Program core | MER-10 to MER-15 | Built: config and roles, ticker-days, strike markets, mint/merge, invariants with a property harness, pause |
-| 2 · Order book and trade paths | MER-20 to MER-25 | Next |
+| 2 · Order book and trade paths | MER-20 to MER-25 | Built: zero-copy order book with halt at close, Buy/Sell Yes, Buy No market and limit, Sell No, cancel, withdraw, taker fee. Phoenix fallback not needed |
+| 3 · Settlement, redeem, cleanup | MER-30 to MER-37 | Next |
 
-See [docs/phase1-coverage.md](docs/phase1-coverage.md) for which matrix cases are covered and which halves wait for later instructions.
+See [docs/phase1-coverage.md](docs/phase1-coverage.md) and [docs/phase2-coverage.md](docs/phase2-coverage.md) for which matrix cases are covered and which halves wait for later instructions. Phase 2 also lists its contract changes and the choices made where the spec was silent.
 
 ## Quick start
 
@@ -56,10 +57,12 @@ cargo update -p ahash --precise 0.8.12
 programs/meridian/
   src/
     lib.rs              instruction entry points
-    state.rs            Config, TickerDay, Market, OrderBook (header), UserLedger
-    events.rs           all spec 4.6 events (emit_cpi!), each with market/slot/seq
+    state.rs            Config, TickerDay, Market, OrderBook (zero-copy), UserLedger
+    book.rs             matching engine: price-time priority, rest, cancel (pure, unit-tested)
+    events.rs           all spec 4.6 events (emit_cpi! format), each with market/slot/seq
     invariants.rs       spec 4.3 checks, run at the end of every mutating instruction
-    instructions/       config, ticker_day, market, mint_merge, pause
+    instructions/       config, ticker_day, market (+ grow_book), mint_merge, pause,
+                        trade (place_order, buy_no_*, sell_no), cancel_withdraw (+ sweep_fees)
   tests/                LiteSVM integration tests, one file per MER task
   idl/meridian.json     committed IDL (drift-checked in CI)
 ```
@@ -71,5 +74,8 @@ Key rules the code enforces:
 - **`initialize_config` can only be signed by the program's upgrade authority**, so nobody can front-run it.
 - **Creation is idempotent** (A25): re-running `create_ticker_day` or `create_strike_market` is a no-op success.
 - **Collateral is accounted**, and the vault check is `vault >= collateral_accounted` (D17), so a USDC donation never bricks a market.
-- **Pause stops entry only** (D30): `mint_pair` (and new orders from Phase 2). `merge_pair` always works until settlement.
+- **Pause stops entry only** (D30): `mint_pair` and every trade path. `merge_pair`, cancels and `withdraw` always work.
+- **Trading halts on-chain at `close_time`** (D12): every trade path requires `open_time <= now < close_time` by the chain clock.
+- **Makers are paid into their `UserLedger`** (R4.6); the taker passes the makers' ledgers as remaining accounts, and `withdraw` moves free balances to the wallet.
+- **A new market's book is grown after creation**: `create_strike_market` + 8 × `grow_book` in one transaction (an instruction can allocate at most 10 KiB).
 - **Minting runs from `mint_open_time` (≈ 08:30 ET) to `close_time`** (D26); trading-date keys are ET `YYYYMMDD` (D31).
