@@ -5,8 +5,7 @@
 //! MNT-05 and INV-09.
 //!
 //! Amounts follow D24: 10,000 micro-USDC per cent, so 10 contracts at 55 cents cost
-//! 5,500,000 micro-USDC. (Some matrix rows quote these notionals a factor of 10 lower;
-//! see docs/phase2-coverage.md.)
+//! 5,500,000 micro-USDC.
 mod common;
 
 use common::*;

@@ -57,11 +57,10 @@ Builder and UI), SCL-06 (load harness, MER-83).
 
 ### Amounts in the matrix
 
-Some matrix rows quote notionals a factor of 10 too low for D24 (10,000 micro-USDC per
-cent). For example BOOK-03 says 10 contracts at 55 cents cost 550,000 micro-USDC; under
-D24 that is 5,500,000 ($5.50). The same applies to TRD-01, TRD-04, TRD-05, TRD-08, BOOK-09
-and CFG-06 (fee 60,000, not 6,000). The tests follow D24. Rows quoted in whole dollars
-(for example "alice +6,000,000" in TRD-08) are already right.
+Some matrix rows quoted notionals a factor of 10 too low for D24 (10,000 micro-USDC per
+cent). They were corrected in test_case_matrix.md on 2026-11-27 (CFG-06, BOOK-03, BOOK-09,
+BOOK-10, BOOK-11, TRD-01, TRD-03, TRD-04, TRD-08, TRD-09, TRD-11, TRD-14), so the tests
+and the matrix now agree.
 
 ## Contract changes in this PR
 
