@@ -11,7 +11,10 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "declaration": false,
-    "sourceMap": true
+    "sourceMap": true,
+    // Test helpers import the Indexer projector, whose ioredis types live in services/indexer/node_modules,
+    // which CI does not install. Resolve them from this service's own copy.
+    "paths": { "ioredis": ["./node_modules/ioredis/built/index.d.ts"] }
   },
   "include": [
     "src",
