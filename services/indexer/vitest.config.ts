@@ -6,5 +6,7 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     pool: "forks",
+    // A shared Redis (CI service container) has one pub/sub namespace: run files one at a time.
+    fileParallelism: !process.env.TEST_REDIS_URL,
   },
 });

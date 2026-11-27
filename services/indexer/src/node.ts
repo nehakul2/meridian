@@ -69,6 +69,7 @@ export class IndexerNode {
     this.unsub.push(this.source.onLogs((sig, _slot, err) => {
       if (!err) void this.enqueue(() => this.indexer.processSignature(sig));
     }));
+    if (this.source.onConfig) this.unsub.push(this.source.onConfig((c) => void this.enqueue(() => this.projector.applyConfig(c))));
     if (this.source.onTickerDay) this.unsub.push(this.source.onTickerDay((td) => void this.enqueue(() => this.projector.applyTickerDay(td))));
     this.timers.push(setInterval(() => void this.enqueue(() => this.indexer.checkFinality()), this.o.finalityEveryMs ?? 5_000));
     this.timers.push(setInterval(() => void this.enqueue(() => this.indexer.serveBackfillRequests()), this.o.backfillPollMs ?? 1_000));

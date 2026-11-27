@@ -218,4 +218,24 @@ describe("projector", () => {
     const entries = await redis.xrange("md:events", "-", "+");
     expect(entries.filter(([, f]) => f.includes("Dropped")).length).toBe(1);
   });
+
+  it("md:cfg, md:px (60 s TTL, publishes throttled to 4 Hz) and md:bal", async () => {
+    if (!r) return;
+    const redis = r.client();
+    let now = 10_000;
+    const p = new Projector(redis, { now: () => now });
+    await p.applyConfig({ paused: false, feeBps: 100, overrideDelayS: 1800, settleWindowS: 5 });
+    expect(await redis.hgetall(K.cfg)).toEqual({ paused: "0", fee_bps: "100", override_delay_s: "1800", settle_window_s: "5", max_qty_per_trade: "500" });
+    const sent: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      if (await p.applyPrice("META", { price: String(68_500_000 + i), conf: "1000", publishTime: 1_800_000_000 + i })) sent.push(now);
+      now += 50; // 20 updates/s
+    }
+    expect(sent).toHaveLength(4); // one per 250 ms over 1 s
+    expect(await redis.hget("md:px:META", "price")).toBe("68500019");
+    expect(await redis.ttl("md:px:META")).toBeGreaterThan(55);
+    await p.applyBalance(U.alice, 12_800_000n);
+    expect(await redis.get(`md:bal:${U.alice}:usdc`)).toBe("12800000");
+    expect(await redis.ttl(`md:bal:${U.alice}:usdc`)).toBeGreaterThan(86_000);
+  });
 });

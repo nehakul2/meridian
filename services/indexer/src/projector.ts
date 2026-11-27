@@ -362,6 +362,42 @@ export class Projector {
     });
   }
 
+  /** Config account update → `md:cfg` (max_qty_per_trade is the Tx Builder cap, D6). */
+  async applyConfig(cfg: { paused: boolean; feeBps: number; overrideDelayS: number; settleWindowS: number; maxQtyPerTrade?: number }): Promise<void> {
+    await this.guard.exec(this.redis, (tx) => {
+      tx.hset(K.cfg, {
+        paused: cfg.paused ? "1" : "0", fee_bps: String(cfg.feeBps), override_delay_s: String(cfg.overrideDelayS),
+        settle_window_s: String(cfg.settleWindowS), max_qty_per_trade: String(cfg.maxQtyPerTrade ?? 500),
+      });
+    });
+  }
+
+  private readonly lastPx = new Map<string, number>();
+
+  /**
+   * Live underlying price → `md:px:{t}` (60 s TTL) and `md:ch:px:{t}`, published at most
+   * 4 times a second per ticker (spec 6.2). Display only; never used for settlement.
+   */
+  async applyPrice(ticker: string, px: { price: string; conf: string; publishTime: number }): Promise<boolean> {
+    const now = this.now();
+    const publish = now - (this.lastPx.get(ticker) ?? -Infinity) >= 250;
+    if (publish) this.lastPx.set(ticker, now);
+    await this.guard.exec(this.redis, (tx) => {
+      tx.hset(`md:px:${ticker}`, { price: px.price, conf: px.conf, publish_time: String(px.publishTime) });
+      tx.expire(`md:px:${ticker}`, 60);
+      if (publish) tx.publish(`md:ch:px:${ticker}`, JSON.stringify({ type: "underlying", price: px.price, conf: px.conf, publish_time: px.publishTime }));
+    });
+    return publish;
+  }
+
+  /** Wallet USDC balance → `md:bal:{o}:usdc` (1 d TTL) and a `balance` user message. */
+  async applyBalance(owner: string, micro: bigint): Promise<void> {
+    await this.guard.exec(this.redis, (tx) => {
+      tx.set(`md:bal:${owner}:usdc`, micro.toString(), "EX", 86_400);
+      tx.publish(K.ch.user(owner), JSON.stringify({ type: "balance", usdc: micro.toString() }));
+    });
+  }
+
   /**
    * Rebuilds one market from its remaining instructions after a confirmed signature was
    * dropped (IDX-05): clears the book, trades, counters, its open orders and positions,

@@ -31,7 +31,8 @@ async function inner(): Promise<TestRedis | null> {
     },
     async flush() {
       const c = new Redis(url);
-      await c.flushall();
+      c.on("error", () => undefined);
+      await c.flushdb();
       await c.quit();
     },
     async stop() {

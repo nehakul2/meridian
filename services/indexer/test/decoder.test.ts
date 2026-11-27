@@ -1,4 +1,7 @@
 // MER-50: event decoder, md:events stream entries and the program-log cursor.
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { utils } from "@coral-xyz/anchor";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { EVENT_KINDS, fromFields, STREAM_KEY } from "../../shared/src/events.js";
@@ -53,6 +56,13 @@ describe("decoder", () => {
     expect(kindsByLabel()).toEqual(EXPECTED);
     const seen = new Set(allEvents().map((e) => e.kind));
     expect([...EVENT_KINDS].filter((k) => !seen.has(k))).toEqual([]);
+  });
+
+  it("the decoded day matches day.events.json (the PG Writer's input fixture)", () => {
+    const file = join(dirname(fileURLToPath(import.meta.url)), "fixtures/day.events.json");
+    const got = allEvents();
+    if (process.env.UPDATE_GOLDEN || !existsSync(file)) writeFileSync(file, JSON.stringify(got) + "\n");
+    expect(got).toEqual(JSON.parse(readFileSync(file, "utf8")));
   });
 
   it("decodes payload fields exactly (Fill, OrderPlaced, Close*, Withdrawn)", () => {

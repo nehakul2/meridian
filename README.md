@@ -17,9 +17,10 @@ files, not in this repo. This repo follows their layout and naming: program test
 | 2 · Order book and trade paths | MER-20 to MER-25 | Built: zero-copy order book with halt at close, Buy/Sell Yes, Buy No market and limit, Sell No, cancel, withdraw, taker fee. Phoenix fallback not needed |
 | 3 · Settlement, redeem, cleanup | MER-30 to MER-37 | Built: official close with the Pyth cross-check, admin override, dispute window, per-strike settle, redeem, void, prune (with the BUY_NO conversion) and close_book |
 | 4 · Automation service | MER-40 to MER-49 | Built: calendar, dynamic strikes and frozen inputs, Hermes client, morning job, settler (two-vendor official close), finalize / strike / prune / close-book cranks, scheduler with single-runner lock, nightly reconcile. MER-48 spike script written, not yet run |
-| 5 · Indexer and PG Writer | MER-50 onwards | Next |
+| 5 · Indexer and PG Writer | MER-50 to MER-54 | Built: event decoder, `md:events` stream, Redis projector (book, BBO with the No view, markets, trades, ticker-days, open orders, positions), leader lease with failover and backfill, PG Writer (idempotent consumer, seq gap backfill, reorg rebuild, candles), positions with intent mapping and average-cost P&L |
+| 6 · REST API, Tx Builder, WebSocket | MER-60 onwards | Next |
 
-See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md) and [docs/phase4-coverage.md](docs/phase4-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 4 also list their contract changes and the choices made where the spec was silent.
+See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md), [docs/phase4-coverage.md](docs/phase4-coverage.md) and [docs/phase5-coverage.md](docs/phase5-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 5 also list their contract changes and the choices made where the spec was silent.
 
 ## Quick start
 
@@ -40,7 +41,8 @@ make prop SEED=…  # replay one failing property sequence
 
 ### Automation service (Phase 4)
 
-Node 22. The LiteSVM suites load `target/deploy/meridian.so`, so build the program first.
+Node 22 or later (CI runs Node 24: on GitHub's runners Node 20 and 22 abort inside V8's GC
+during the LiteSVM suites). The LiteSVM suites load `target/deploy/meridian.so`, so build the program first.
 The Postgres suite starts a throwaway local cluster, or uses `TEST_DATABASE_URL`.
 
 ```sh
@@ -55,6 +57,26 @@ node dist/src/main.js                    # scheduler loop
 
 Configuration is in `.env.example` (own RPC endpoint and keys: fee payer, `market_creator`,
 `settler`; never admin). `services/automation/Dockerfile` builds the deployment image.
+
+### Indexer and PG Writer (Phase 5)
+
+Node 22 or later. The suites start a throwaway `redis-server` and Postgres cluster, or use
+`TEST_REDIS_URL` / `TEST_DATABASE_URL`. They run on an event fixture recorded from the real
+program, so they need neither the program build nor LiteSVM.
+
+```sh
+make data-test                           # typecheck + tests for services/indexer and services/pg-writer
+cd services/indexer
+npm test                                 # decoder, Redis projector, leader / failover (~2 s)
+npm run fixture:record                   # re-record test/fixtures/day.json (needs make build and
+                                         # services/automation's node_modules), then UPDATE_GOLDEN=1 npm test
+node dist/indexer/src/main.js            # RPC_URL, REDIS_URL, DATABASE_URL; active or standby
+cd ../pg-writer
+npm test                                 # consumer (gap, reorg, replay, lag) and positions (~6 s)
+node dist/pg-writer/src/main.js          # REDIS_URL, DATABASE_URL, MARKET_CREATOR
+```
+
+Code both services run (event types, the positions and P&L engine) is in `services/shared/src`.
 
 ### Dependency pins
 

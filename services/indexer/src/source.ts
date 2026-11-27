@@ -34,6 +34,15 @@ export interface ChainSource {
   onLogs(cb: (signature: string, slot: number, err: unknown) => void): () => void;
   /** TickerDay account changes at `confirmed`. */
   onTickerDay?(cb: (td: TickerDayInfo) => void): () => void;
+  /** Config account changes at `confirmed`. */
+  onConfig?(cb: (c: ConfigInfo) => void): () => void;
+}
+
+export interface ConfigInfo {
+  paused: boolean;
+  feeBps: number;
+  overrideDelayS: number;
+  settleWindowS: number;
 }
 
 export class RpcSource implements ChainSource {
@@ -65,6 +74,20 @@ export class RpcSource implements ChainSource {
   onLogs(cb: (signature: string, slot: number, err: unknown) => void): () => void {
     const id = this.conn.onLogs(PROGRAM_ID, (l, ctx) => cb(l.signature, ctx.slot, l.err), this.commitment);
     return () => void this.conn.removeOnLogsListener(id);
+  }
+
+  onConfig(cb: (c: ConfigInfo) => void): () => void {
+    const config = PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM_ID)[0];
+    const id = this.conn.onAccountChange(config, (a) => {
+      try {
+        const d = coder.accounts.decode("Config", a.data) as Record<string, unknown>;
+        const n = (k: string) => Number((d[k] as { toString(): string }).toString());
+        cb({ paused: Boolean(d.paused), feeBps: n("fee_bps"), overrideDelayS: n("override_delay_s"), settleWindowS: n("settle_window_s") });
+      } catch {
+        /* not decodable: ignore */
+      }
+    }, { commitment: this.commitment });
+    return () => void this.conn.removeAccountChangeListener(id);
   }
 
   onTickerDay(cb: (td: TickerDayInfo) => void): () => void {
