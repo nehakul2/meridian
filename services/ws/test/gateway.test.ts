@@ -221,13 +221,23 @@ describe("ws gateway", () => {
     const c = await client();
     c.send({ op: "subscribe", channels: [`trades:${M680}`] });
     await c.waitFor((m) => m.type === "subscribed");
+    // Warm up: the first message proves Redis → gateway → client is flowing before timing starts.
+    const diag = () => `receivers=${receivers.join(",")} forwarded=${gw.stats.forwarded} conns=${gw.connections}`;
+    const receivers: number[] = [];
+    for (let k = 0; k < 100 && !c.of("warm").length; k++) {
+      receivers.push(await redis.publish(K.ch.trades(M680), JSON.stringify({ type: "warm" })));
+      await sleep(20);
+    }
+    expect(c.of("warm").length, diag()).toBeGreaterThan(0);
     const sent: number[] = [];
     for (let k = 0; k < 100; k++) {
       sent.push(performance.now());
-      await redis.publish(K.ch.trades(M680), JSON.stringify({ type: "trade", seq: String(k), price: 61, qty: 1 }));
+      receivers.push(await redis.publish(K.ch.trades(M680), JSON.stringify({ type: "trade", seq: String(k), price: 61, qty: 1 })));
       await sleep(2);
     }
-    await c.waitFor(() => c.of("trade").length === 100);
+    await c.waitFor(() => c.of("trade").length === 100, 5000).catch((e) => {
+      throw new Error(`${(e as Error).message.slice(0, 200)}; trades=${c.of("trade").length} ${diag()}`);
+    });
     const lat = c.of("trade").map((m) => m.at - sent[Number(m.seq)]!).sort((a, b) => a - b);
     expect(lat[94]!).toBeLessThan(50);
   });
