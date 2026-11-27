@@ -168,6 +168,8 @@ impl Env {
         }
         let usdc = env.usdc_mint;
         env.put_mint(usdc, 6, Some(Pubkey::new_unique()));
+        let (fv, admin) = (env.fee_vault, env.admin.pubkey());
+        env.put_token_account(fv, usdc, admin, 0);
         env.warp(MINT_OPEN - 3_600);
         env
     }
@@ -465,6 +467,8 @@ impl Env {
             no_mint: seeded(NO_MINT_SEED, &market),
             vault: seeded(VAULT_SEED, &market),
             book: seeded(BOOK_SEED, &market),
+            base_vault: seeded(BASE_VAULT_SEED, &market),
+            quote_vault: seeded(QUOTE_VAULT_SEED, &market),
             usdc_mint: self.usdc_mint,
             token_program: spl_token::ID,
             system_program: solana_sdk::system_program::ID,
@@ -498,15 +502,19 @@ impl Env {
         strike: u64,
         admin_path: bool,
     ) -> TxResult {
+        let market = market_pda(ticker, date, strike);
         let ix = self.ix_create_market(
             &signer.pubkey(),
             ticker_day_pda(ticker, date),
-            market_pda(ticker, date, strike),
+            market,
             strike,
             admin_path,
         );
+        // What the morning job sends: create, then grow the book to full size (MER-20).
+        let mut ixs = vec![ix];
+        ixs.extend(self.ix_grow_book_all(&market));
         let payer = self.payer.insecure_clone();
-        self.send(&[ix], &[&payer, signer])
+        self.send(&ixs, &[&payer, signer])
     }
 
     pub fn create_market(&mut self, ticker: &str, date: u32, strike: u64) -> TxResult {
@@ -517,6 +525,26 @@ impl Env {
     pub fn add_strike(&mut self, ticker: &str, date: u32, strike: u64) -> TxResult {
         let admin = self.admin.insecure_clone();
         self.create_market_as(&admin, ticker, date, strike, true)
+    }
+
+    pub fn ix_grow_book(&self, market: &Pubkey) -> Instruction {
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::GrowBook {
+                payer: self.payer.pubkey(),
+                market: *market,
+                book: seeded(BOOK_SEED, market),
+                system_program: solana_sdk::system_program::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::GrowBook {}.data(),
+        }
+    }
+
+    /// Enough grow_book instructions to take a fresh book to full size.
+    pub fn ix_grow_book_all(&self, market: &Pubkey) -> Vec<Instruction> {
+        let steps = (OrderBook::LEN - BOOK_GROWTH_STEP).div_ceil(BOOK_GROWTH_STEP);
+        (0..steps).map(|_| self.ix_grow_book(market)).collect()
     }
 
     pub fn ix_mint_merge(
@@ -599,6 +627,360 @@ impl Env {
         data.resize(acc.data.len(), 0);
         acc.data = data;
         self.svm.set_account(*td, acc).unwrap();
+    }
+}
+
+// ---- order book (Phase 2) ----
+
+pub use meridian::events::{Side, TimeInForce};
+
+pub fn ledger_pda(market: &Pubkey, owner: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[LEDGER_SEED, market.as_ref(), owner.as_ref()],
+        &meridian::ID,
+    )
+    .0
+}
+
+/// An aligned copy of the zero-copy book.
+pub struct BookView(Vec<u64>);
+impl BookView {
+    pub fn get(&self) -> &OrderBook {
+        bytemuck::from_bytes(
+            &bytemuck::cast_slice::<u64, u8>(&self.0)[..std::mem::size_of::<OrderBook>()],
+        )
+    }
+    /// (owner, order_id, qty, tag) at a level, oldest first.
+    pub fn level(&self, side: Side, price: u8) -> Vec<(Pubkey, u64, u64, u8)> {
+        let s = if side == Side::Bid {
+            SIDE_BID
+        } else {
+            SIDE_ASK
+        };
+        let l = self.get().level(s, price);
+        l.orders[..l.len as usize]
+            .iter()
+            .map(|o| (o.owner, o.order_id, o.qty, o.tag))
+            .collect()
+    }
+}
+
+pub enum TradeIx {
+    Place {
+        side: Side,
+        price: u8,
+        qty: u64,
+        tif: TimeInForce,
+    },
+    BuyNoMarket {
+        qty: u64,
+        min_yes: u8,
+    },
+    BuyNoLimit {
+        qty: u64,
+        yes_price: u8,
+    },
+    SellNo {
+        qty: u64,
+        max_yes: u8,
+    },
+}
+
+impl Env {
+    pub fn book(&self, market: &Pubkey) -> BookView {
+        let m = self.market(market);
+        let acc = self.svm.get_account(&m.book).unwrap();
+        assert_eq!(acc.data.len(), OrderBook::LEN, "book not fully grown");
+        let mut buf = vec![0u64; (acc.data.len() - 8).div_ceil(8)];
+        bytemuck::cast_slice_mut::<u64, u8>(&mut buf)[..acc.data.len() - 8]
+            .copy_from_slice(&acc.data[8..]);
+        BookView(buf)
+    }
+
+    pub fn ledger(&self, market: &Pubkey, owner: &Pubkey) -> UserLedger {
+        self.fetch(&ledger_pda(market, owner))
+    }
+
+    /// Ledgers of every resting owner on the side a taker of `taker_side` would hit.
+    pub fn makers_for(&self, market: &Pubkey, taker: &Pubkey, taker_side: usize) -> Vec<Pubkey> {
+        let view = self.book(market);
+        let b = view.get();
+        let maker_side = 1 - taker_side;
+        let mut out: Vec<Pubkey> = vec![];
+        for p in MIN_PRICE..=MAX_PRICE {
+            let l = b.level(maker_side, p);
+            for o in &l.orders[..l.len as usize] {
+                let k = ledger_pda(market, &o.owner);
+                if o.owner != *taker && !out.contains(&k) {
+                    out.push(k);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn ix_trade(
+        &self,
+        user: &Pubkey,
+        market: &Pubkey,
+        t: &TradeIx,
+        makers: &[Pubkey],
+    ) -> Instruction {
+        let m = self.market(market);
+        let mut accounts = meridian::accounts::Trade {
+            user: *user,
+            config: config_pda(),
+            ticker_day: m.ticker_day,
+            market: *market,
+            book: m.book,
+            base_vault: seeded(BASE_VAULT_SEED, market),
+            quote_vault: seeded(QUOTE_VAULT_SEED, market),
+            vault: m.vault,
+            yes_mint: m.yes_mint,
+            no_mint: m.no_mint,
+            ledger: ledger_pda(market, user),
+            user_usdc: ata(user, &self.usdc_mint),
+            user_yes: ata(user, &m.yes_mint),
+            user_no: ata(user, &m.no_mint),
+            token_program: spl_token::ID,
+            associated_token_program: spl_associated_token_account::ID,
+            system_program: solana_sdk::system_program::ID,
+            event_authority: event_authority(),
+            program: meridian::ID,
+        }
+        .to_account_metas(None);
+        for k in makers {
+            accounts.push(solana_sdk::instruction::AccountMeta::new(*k, false));
+        }
+        let data = match *t {
+            TradeIx::Place {
+                side,
+                price,
+                qty,
+                tif,
+            } => meridian::instruction::PlaceOrder {
+                side,
+                price,
+                qty,
+                tif,
+                client_id: 7,
+            }
+            .data(),
+            TradeIx::BuyNoMarket { qty, min_yes } => meridian::instruction::BuyNoMarket {
+                qty,
+                min_yes_price: min_yes,
+            }
+            .data(),
+            TradeIx::BuyNoLimit { qty, yes_price } => {
+                meridian::instruction::BuyNoLimit { qty, yes_price }.data()
+            }
+            TradeIx::SellNo { qty, max_yes } => meridian::instruction::SellNo {
+                qty,
+                max_yes_price: max_yes,
+            }
+            .data(),
+        };
+        Instruction {
+            program_id: meridian::ID,
+            accounts,
+            data,
+        }
+    }
+
+    /// Builds a trade with every maker ledger it could need, read from the current book.
+    pub fn ix_trade_auto(&self, user: &Pubkey, market: &Pubkey, t: &TradeIx) -> Instruction {
+        let taker_side = match t {
+            TradeIx::Place {
+                side: Side::Bid, ..
+            }
+            | TradeIx::SellNo { .. } => SIDE_BID,
+            _ => SIDE_ASK,
+        };
+        let makers = self.makers_for(market, user, taker_side);
+        self.ix_trade(user, market, t, &makers)
+    }
+
+    pub fn trade(&mut self, user: &Keypair, market: &Pubkey, t: TradeIx) -> TxResult {
+        let ix = self.ix_trade_auto(&user.pubkey(), market, &t);
+        self.send(&[ix], &[user])
+    }
+
+    pub fn place(
+        &mut self,
+        user: &Keypair,
+        market: &Pubkey,
+        side: Side,
+        price: u8,
+        qty: u64,
+        tif: TimeInForce,
+    ) -> TxResult {
+        self.trade(
+            user,
+            market,
+            TradeIx::Place {
+                side,
+                price,
+                qty,
+                tif,
+            },
+        )
+    }
+    pub fn bid(
+        &mut self,
+        user: &Keypair,
+        market: &Pubkey,
+        price: u8,
+        qty: u64,
+        tif: TimeInForce,
+    ) -> TxResult {
+        self.place(user, market, Side::Bid, price, qty, tif)
+    }
+    pub fn ask(
+        &mut self,
+        user: &Keypair,
+        market: &Pubkey,
+        price: u8,
+        qty: u64,
+        tif: TimeInForce,
+    ) -> TxResult {
+        self.place(user, market, Side::Ask, price, qty, tif)
+    }
+
+    pub fn ix_cancel(&self, owner: &Pubkey, market: &Pubkey, order_id: Option<u64>) -> Instruction {
+        let m = self.market(market);
+        let accounts = meridian::accounts::CancelOrders {
+            owner: *owner,
+            config: config_pda(),
+            market: *market,
+            book: m.book,
+            ledger: ledger_pda(market, owner),
+            base_vault: seeded(BASE_VAULT_SEED, market),
+            quote_vault: seeded(QUOTE_VAULT_SEED, market),
+            vault: m.vault,
+            yes_mint: m.yes_mint,
+            no_mint: m.no_mint,
+            user_usdc: ata(owner, &self.usdc_mint),
+            user_no: ata(owner, &m.no_mint),
+            token_program: spl_token::ID,
+            associated_token_program: spl_associated_token_account::ID,
+            system_program: solana_sdk::system_program::ID,
+            event_authority: event_authority(),
+            program: meridian::ID,
+        }
+        .to_account_metas(None);
+        let data = match order_id {
+            Some(order_id) => meridian::instruction::CancelOrder { order_id }.data(),
+            None => meridian::instruction::CancelAll {}.data(),
+        };
+        Instruction {
+            program_id: meridian::ID,
+            accounts,
+            data,
+        }
+    }
+
+    pub fn cancel(&mut self, owner: &Keypair, market: &Pubkey, order_id: u64) -> TxResult {
+        let ix = self.ix_cancel(&owner.pubkey(), market, Some(order_id));
+        self.send(&[ix], &[owner])
+    }
+
+    pub fn cancel_all(&mut self, owner: &Keypair, market: &Pubkey) -> TxResult {
+        let ix = self.ix_cancel(&owner.pubkey(), market, None);
+        self.send(&[ix], &[owner])
+    }
+
+    pub fn ix_withdraw(&self, owner: &Pubkey, market: &Pubkey, ledger: Pubkey) -> Instruction {
+        let m = self.market(market);
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::Withdraw {
+                owner: *owner,
+                config: config_pda(),
+                market: *market,
+                book: m.book,
+                ledger,
+                base_vault: seeded(BASE_VAULT_SEED, market),
+                quote_vault: seeded(QUOTE_VAULT_SEED, market),
+                yes_mint: m.yes_mint,
+                user_usdc: ata(owner, &self.usdc_mint),
+                user_yes: ata(owner, &m.yes_mint),
+                token_program: spl_token::ID,
+                associated_token_program: spl_associated_token_account::ID,
+                system_program: solana_sdk::system_program::ID,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::Withdraw {}.data(),
+        }
+    }
+
+    pub fn sweep_fees(&mut self, market: &Pubkey) -> TxResult {
+        let m = self.market(market);
+        let ix = Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::SweepFees {
+                config: config_pda(),
+                market: *market,
+                book: m.book,
+                quote_vault: seeded(QUOTE_VAULT_SEED, market),
+                fee_vault: self.config().fee_vault,
+                token_program: spl_token::ID,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::SweepFees {}.data(),
+        };
+        let payer = self.payer.insecure_clone();
+        self.send(&[ix], &[&payer])
+    }
+
+    pub fn withdraw(&mut self, owner: &Keypair, market: &Pubkey) -> TxResult {
+        let ix = self.ix_withdraw(&owner.pubkey(), market, ledger_pda(market, &owner.pubkey()));
+        self.send(&[ix], &[owner])
+    }
+
+    /// A user holding `yes` Yes (minted as pairs, No kept) with `usdc` left over.
+    pub fn user_with_yes(&mut self, market: &Pubkey, usdc: u64, yes: u64) -> Keypair {
+        let u = self.user(usdc + yes * USDC);
+        if yes > 0 {
+            self.mint_pair(&u, market, yes).unwrap();
+        }
+        u
+    }
+
+    /// Book escrow invariant (INV-05) plus "book totals == sum of the given ledgers".
+    pub fn assert_book_escrow(&self, market: &Pubkey, owners: &[Pubkey]) {
+        let view = self.book(market);
+        let b = view.get();
+        let base = self.token_balance(&seeded(BASE_VAULT_SEED, market));
+        let quote = self.token_balance(&seeded(QUOTE_VAULT_SEED, market));
+        assert!(
+            meridian::invariants::check_book_escrow(base, quote, b),
+            "INV-05 broken"
+        );
+        let mut sums = (0u64, 0u64, 0u64, 0u64);
+        for o in owners {
+            if !self.exists(&ledger_pda(market, o)) {
+                continue;
+            }
+            let l = self.ledger(market, o);
+            sums.0 += l.locked_usdc;
+            sums.1 += l.free_usdc;
+            sums.2 += l.locked_yes;
+            sums.3 += l.free_yes;
+        }
+        assert_eq!(
+            sums,
+            (
+                b.total_locked_usdc,
+                b.total_free_usdc,
+                b.total_locked_yes,
+                b.total_free_yes
+            ),
+            "book totals differ from the sum of ledgers"
+        );
     }
 }
 

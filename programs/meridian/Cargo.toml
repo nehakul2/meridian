@@ -23,6 +23,8 @@ anchor-debug = []
 [dependencies]
 anchor-lang = { version = "=0.31.1", features = ["init-if-needed", "event-cpi"] }
 anchor-spl = { version = "=0.31.1" }
+# Pod arrays longer than 32 for the zero-copy order book.
+bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
 
 [dev-dependencies]
 litesvm = "0.6.1"

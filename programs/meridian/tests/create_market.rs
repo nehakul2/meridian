@@ -41,9 +41,13 @@ fn mkt_01_create_strike_market_creates_mints_vault_and_book() {
     let vault = spl_token_account(&env, &m.vault);
     assert_eq!(vault.mint, env.usdc_mint);
     assert_eq!(vault.owner, mkey);
-    let book: OrderBook = env.fetch(&m.book);
+    let view = env.book(&mkey);
+    let book: &OrderBook = view.get();
     assert_eq!(book.market, mkey);
     assert_eq!(book.next_order_id, 1);
+    assert_eq!(book.base_vault, seeded(BASE_VAULT_SEED, &mkey));
+    assert_eq!(book.quote_vault, seeded(QUOTE_VAULT_SEED, &mkey));
+    assert_eq!(book.order_count, 0);
     let td: TickerDay = env.fetch(&ticker_day_pda("META", DATE));
     assert_eq!(td.strike_count, 1);
 

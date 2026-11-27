@@ -1868,6 +1868,7 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "bincode",
+ "bytemuck",
  "litesvm",
  "serde_json",
  "solana-sdk",

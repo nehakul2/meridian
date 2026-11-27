@@ -64,14 +64,32 @@ pub struct CreateMarket<'info> {
     )]
     pub vault: Box<Account<'info, TokenAccount>>,
 
+    /// CHECK: the order book PDA. Created here at `BOOK_GROWTH_STEP` bytes (the most one
+    /// instruction may allocate); `grow_book` grows it to `OrderBook::LEN` and initialises it.
+    #[account(mut, seeds = [BOOK_SEED, market.key().as_ref()], bump)]
+    pub book: UncheckedAccount<'info>,
+
+    /// Yes escrow for resting asks and makers' free Yes.
     #[account(
         init_if_needed,
         payer = payer,
-        space = 8 + OrderBook::INIT_SPACE,
-        seeds = [BOOK_SEED, market.key().as_ref()],
+        seeds = [BASE_VAULT_SEED, market.key().as_ref()],
         bump,
+        token::mint = yes_mint,
+        token::authority = market,
     )]
-    pub book: Box<Account<'info, OrderBook>>,
+    pub base_vault: Box<Account<'info, TokenAccount>>,
+
+    /// USDC escrow for resting bids and makers' free USDC.
+    #[account(
+        init_if_needed,
+        payer = payer,
+        seeds = [QUOTE_VAULT_SEED, market.key().as_ref()],
+        bump,
+        token::mint = usdc_mint,
+        token::authority = market,
+    )]
+    pub quote_vault: Box<Account<'info, TokenAccount>>,
 
     #[account(address = config.usdc_mint @ MeridianError::AccountMismatch)]
     pub usdc_mint: Box<Account<'info, Mint>>,
@@ -166,11 +184,26 @@ pub fn create_market(
         no_mint_bump: ctx.bumps.no_mint,
     });
 
-    let book = &mut ctx.accounts.book;
-    book.market = market.key();
-    book.next_order_id = 1;
-    book.order_count = 0;
-    book.bump = ctx.bumps.book;
+    // The book PDA starts at one growth step; grow_book finishes it (MER-20).
+    let book = &ctx.accounts.book;
+    if book.lamports() == 0 {
+        let mkey = market.key();
+        let seeds: &[&[u8]] = &[BOOK_SEED, mkey.as_ref(), &[ctx.bumps.book]];
+        let rent = Rent::get()?.minimum_balance(BOOK_GROWTH_STEP);
+        anchor_lang::system_program::create_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::CreateAccount {
+                    from: ctx.accounts.payer.to_account_info(),
+                    to: book.to_account_info(),
+                },
+                &[seeds],
+            ),
+            rent,
+            BOOK_GROWTH_STEP as u64,
+            ctx.program_id,
+        )?;
+    }
 
     assert_invariants(&MarketSnapshot::of(
         market,
@@ -195,5 +228,70 @@ pub fn create_market(
         created_by: ctx.accounts.authority.key(),
     };
     emit_cpi!(ev);
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct GrowBook<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    #[account(
+        seeds = [MARKET_SEED, ticker_seed(&market.ticker), &market.date.to_le_bytes(), &market.strike_cents.to_le_bytes()],
+        bump = market.bump,
+    )]
+    pub market: Box<Account<'info, Market>>,
+
+    /// CHECK: the market's book PDA (address checked); owner checked in the handler.
+    #[account(mut, address = market.book @ MeridianError::AccountMismatch)]
+    pub book: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+/// Permissionless. Grows the book by one step (10 KiB, the per-instruction limit);
+/// the step that reaches full size writes the header. A no-op once the book is ready,
+/// so the morning job can always send `create_strike_market` + 8 x `grow_book` in one
+/// transaction and re-run it safely (A25).
+pub fn grow_book(ctx: Context<GrowBook>) -> Result<()> {
+    let info = ctx.accounts.book.to_account_info();
+    require_keys_eq!(*info.owner, crate::ID, MeridianError::AccountMismatch);
+    let len = info.data_len();
+    if len >= OrderBook::LEN {
+        return Ok(());
+    }
+    let new_len = (len + BOOK_GROWTH_STEP).min(OrderBook::LEN);
+    let need = Rent::get()?
+        .minimum_balance(new_len)
+        .saturating_sub(info.lamports());
+    if need > 0 {
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.payer.to_account_info(),
+                    to: info.clone(),
+                },
+            ),
+            need,
+        )?;
+    }
+    info.realloc(new_len, true)?;
+    if new_len == OrderBook::LEN {
+        let mkey = ctx.accounts.market.key();
+        let (base_vault, _) =
+            Pubkey::find_program_address(&[BASE_VAULT_SEED, mkey.as_ref()], ctx.program_id);
+        let (quote_vault, _) =
+            Pubkey::find_program_address(&[QUOTE_VAULT_SEED, mkey.as_ref()], ctx.program_id);
+        let (_, bump) = Pubkey::find_program_address(&[BOOK_SEED, mkey.as_ref()], ctx.program_id);
+        let mut data = info.try_borrow_mut_data()?;
+        data[..8].copy_from_slice(OrderBook::DISCRIMINATOR);
+        let bk: &mut OrderBook = bytemuck::from_bytes_mut(&mut data[8..OrderBook::LEN]);
+        bk.market = mkey;
+        bk.base_vault = base_vault;
+        bk.quote_vault = quote_vault;
+        bk.next_order_id = 1;
+        bk.bump = bump;
+    }
     Ok(())
 }

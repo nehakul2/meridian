@@ -1,13 +1,13 @@
 //! Market invariants (spec 4.3), asserted at the end of every mutating instruction (MER-14).
 //!
-//! Item 7 (book escrow) is added with the order book in MER-20; item 6
+//! Item 7 (book escrow) is `check_book_escrow`, run by every order-book instruction; item 6
 //! (status only moves forward) is enforced at each status write and checked
 //! by the property tests.
 use anchor_lang::prelude::*;
 
 use crate::constants::*;
 use crate::errors::MeridianError;
-use crate::state::{Market, MarketStatus, Outcome};
+use crate::state::{Market, MarketStatus, OrderBook, Outcome};
 
 /// Payout in micro-USDC for one token of each side, given an outcome.
 /// Invariant 4: `payout(o).0 + payout(o).1 == $1.00` for every settled outcome.
@@ -82,6 +82,35 @@ pub fn check(s: &MarketSnapshot) -> Option<u8> {
 pub fn assert_invariants(s: &MarketSnapshot) -> Result<()> {
     if let Some(n) = check(s) {
         msg!("invariant {} violated: {:?}", n, s);
+        return err!(MeridianError::InvariantViolated);
+    }
+    Ok(())
+}
+
+/// Invariant 7 (spec 4.3), strengthened to cover free balances too, because makers'
+/// proceeds and unlocked funds also sit in the book vaults until withdrawn:
+/// `base_vault >= locked_yes + free_yes` and
+/// `quote_vault >= locked_usdc + free_usdc + fees_accrued`, summed over every ledger of
+/// the market (kept as running totals in the book).
+pub fn check_book_escrow(base_amount: u64, quote_amount: u64, book: &OrderBook) -> bool {
+    let yes = (book.total_locked_yes as u128) + (book.total_free_yes as u128);
+    let usdc = (book.total_locked_usdc as u128)
+        + (book.total_free_usdc as u128)
+        + (book.fees_accrued as u128);
+    base_amount as u128 >= yes && quote_amount as u128 >= usdc
+}
+
+pub fn assert_book_escrow(base_amount: u64, quote_amount: u64, book: &OrderBook) -> Result<()> {
+    if !check_book_escrow(base_amount, quote_amount, book) {
+        msg!(
+            "invariant 7 violated: base {} quote {} locked_yes {} free_yes {} locked_usdc {} free_usdc {}",
+            base_amount,
+            quote_amount,
+            book.total_locked_yes,
+            book.total_free_yes,
+            book.total_locked_usdc,
+            book.total_free_usdc
+        );
         return err!(MeridianError::InvariantViolated);
     }
     Ok(())

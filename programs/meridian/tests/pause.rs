@@ -1,7 +1,7 @@
 //! MER-15 · pause and unpause scope (D30).
-//! Matrix: PSE-01 .. PSE-05. Order, cancel, withdraw, settle, redeem and prune
-//! halves of PSE-01..04 are added to this file as those instructions land
-//! (MER-20 to MER-35).
+//! Matrix: PSE-01 .. PSE-05. Phase 2 adds the order halves (place_order, buy_no_*,
+//! sell_no blocked; cancel_order, cancel_all, withdraw allowed; place_order restored).
+//! The settle, redeem and prune halves of PSE-03 land with MER-31 to MER-35.
 mod common;
 
 use common::*;
@@ -83,4 +83,76 @@ fn pse_05_only_admin_can_pause() {
         assert_err(env.set_paused(k, false), MeridianError::Unauthorized);
     }
     assert!(env.config().paused);
+}
+
+#[test]
+fn pse_01_pause_blocks_new_orders_and_every_trade_path() {
+    let (mut env, m) = Env::with_market();
+    env.warp(OPEN);
+    let alice = env.user_with_yes(&m, 100 * USDC, 10);
+    let admin = env.admin.insecure_clone();
+    env.set_paused(&admin, true).unwrap();
+    for t in [
+        TradeIx::Place {
+            side: Side::Bid,
+            price: 40,
+            qty: 1,
+            tif: TimeInForce::Gtc,
+        },
+        TradeIx::Place {
+            side: Side::Ask,
+            price: 60,
+            qty: 1,
+            tif: TimeInForce::Ioc,
+        },
+        TradeIx::BuyNoMarket { qty: 1, min_yes: 1 },
+        TradeIx::BuyNoLimit {
+            qty: 1,
+            yes_price: 60,
+        },
+        TradeIx::SellNo {
+            qty: 1,
+            max_yes: 99,
+        },
+    ] {
+        assert_err(env.trade(&alice, &m, t), MeridianError::Paused);
+    }
+}
+
+#[test]
+fn pse_02_pause_leaves_cancel_and_withdraw_open() {
+    let (mut env, m) = Env::with_market();
+    env.warp(OPEN);
+    let alice = env.user_with_yes(&m, 100 * USDC, 10);
+    let bob = env.user(100 * USDC);
+    env.ask(&alice, &m, 60, 4, TimeInForce::Gtc).unwrap();
+    env.ask(&alice, &m, 61, 4, TimeInForce::Gtc).unwrap();
+    env.bid(&bob, &m, 60, 2, TimeInForce::Ioc).unwrap();
+    let admin = env.admin.insecure_clone();
+    env.set_paused(&admin, true).unwrap();
+    let id = env.book(&m).level(Side::Ask, 60)[0].1;
+    env.cancel(&alice, &m, id).unwrap();
+    env.cancel_all(&alice, &m).unwrap();
+    env.withdraw(&alice, &m).unwrap();
+    env.withdraw(&bob, &m).unwrap();
+    assert_eq!(
+        env.balances(&alice.pubkey(), &m),
+        (100 * USDC + 2 * 60 * 10_000, 8, 10)
+    );
+    assert_eq!(env.balances(&bob.pubkey(), &m).1, 2);
+}
+
+#[test]
+fn pse_04_unpause_restores_orders() {
+    let (mut env, m) = Env::with_market();
+    env.warp(OPEN);
+    let alice = env.user(100 * USDC);
+    let admin = env.admin.insecure_clone();
+    env.set_paused(&admin, true).unwrap();
+    assert_err(
+        env.bid(&alice, &m, 40, 1, TimeInForce::Gtc),
+        MeridianError::Paused,
+    );
+    env.set_paused(&admin, false).unwrap();
+    env.bid(&alice, &m, 40, 1, TimeInForce::Gtc).unwrap();
 }

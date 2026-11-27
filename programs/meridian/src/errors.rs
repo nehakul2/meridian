@@ -42,4 +42,24 @@ pub enum MeridianError {
     InsufficientTokens,
     #[msg("Invariant violated")]
     InvariantViolated,
+    #[msg("Order book is not open yet: now < open_time")]
+    MarketNotOpen,
+    #[msg("Trading halted: now >= close_time")]
+    MarketHalted,
+    #[msg("Price must be 1 to 99 cents")]
+    InvalidPrice,
+    #[msg("Order is larger than the on-chain maximum")]
+    OrderTooLarge,
+    #[msg("Price level is full")]
+    LevelFull,
+    #[msg("Post-only order would cross the book")]
+    WouldCross,
+    #[msg("No bids at or above the minimum Yes price")]
+    NoLiquidity,
+    #[msg("Order not found")]
+    OrderNotFound,
+    #[msg("A maker's ledger was not passed, and the remainder would cross the book")]
+    MakerLedgerMissing,
+    #[msg("Not enough USDC")]
+    InsufficientFunds,
 }
