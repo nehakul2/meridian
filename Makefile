@@ -4,7 +4,7 @@ ANCHOR_VERSION := 0.31.1
 PROGRAM_DIR    := programs/meridian
 IDL            := $(PROGRAM_DIR)/idl/meridian.json
 
-.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test api-test
+.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test api-test app-dev app-test
 
 doctor:
 	@./scripts/doctor.sh $(SOLANA_VERSION) $(ANCHOR_VERSION)
@@ -56,3 +56,11 @@ api-test: build
 	cd services/api && npm ci && npm run typecheck && npm test
 	cd services/txb && npm ci && npm run typecheck && npm test
 	cd services/ws && npm ci && npm run typecheck && npm test
+
+# Frontend (Phase 7). app-dev runs the stub backend and the Next dev server; app-test runs
+# typecheck, component tests, the static build and the Playwright suite against the stub.
+app-dev:
+	cd app && npm ci && (npm run stub & npm run dev)
+
+app-test:
+	cd app && npm ci && npm run typecheck && npm test && npx next build && npx playwright test e2e/frontend.spec.ts
