@@ -50,8 +50,14 @@ jobs:
         working-directory: services/automation
       - run: npm run typecheck
         working-directory: services/automation
+      - name: Runner details
+        run: |
+          nproc; free -m; ulimit -a; cat /proc/sys/vm/overcommit_memory
+          grep -m1 "model name" /proc/cpuinfo; node -v
+      # One test file at a time with the verbose reporter, so a native crash in a worker
+      # names the file and test it happened in.
       - name: Tests (unit, Postgres, LiteSVM)
-        run: npm test
+        run: npx vitest run --no-file-parallelism --reporter=verbose
         working-directory: services/automation
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
