@@ -94,6 +94,12 @@ pub fn market_pda(ticker: &str, date: u32, strike: u64) -> Pubkey {
 pub fn seeded(seed: &[u8], market: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[seed, market.as_ref()], &meridian::ID).0
 }
+pub fn bond_authority() -> Pubkey {
+    Pubkey::find_program_address(&[BOND_AUTHORITY_SEED], &meridian::ID).0
+}
+pub fn dispute_pda(td: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[DISPUTE_SEED, td.as_ref()], &meridian::ID).0
+}
 pub fn event_authority() -> Pubkey {
     Pubkey::find_program_address(&[b"__event_authority"], &meridian::ID).0
 }
@@ -170,6 +176,9 @@ impl Env {
         env.put_mint(usdc, 6, Some(Pubkey::new_unique()));
         let (fv, admin) = (env.fee_vault, env.admin.pubkey());
         env.put_token_account(fv, usdc, admin, 0);
+        // The bond vault is owned by the bond authority PDA (MER-37).
+        let bv = env.bond_vault;
+        env.put_token_account(bv, usdc, bond_authority(), 0);
         env.warp(MINT_OPEN - 3_600);
         env
     }
@@ -1024,4 +1033,515 @@ pub fn deploy_upgradeable(svm: &mut LiteSVM, elf: &[u8], authority: &Pubkey) {
         },
     )
     .unwrap();
+}
+
+// ---- settlement (Phase 3) ----
+
+pub use meridian::instructions::{OfficialClose, Resolution};
+
+/// META's index in MAG7 (its feed id is `feed_id(META_IDX)`).
+pub const META_IDX: usize = 5;
+/// Pyth equity feeds use expo -5.
+pub const EXPO: i32 = -5;
+/// Dollars to a price at expo -5 (whole cents only).
+pub const fn px(cents: i64) -> i64 {
+    cents * 1_000
+}
+
+/// A Pyth `PriceUpdateV2` as the receiver would write it.
+#[derive(Clone, Copy, Debug)]
+pub struct Update {
+    pub feed_id: [u8; 32],
+    pub price: i64,
+    pub conf: u64,
+    pub expo: i32,
+    pub publish_time: i64,
+    /// `None` = Full; `Some(n)` = Partial { num_signatures: n }.
+    pub partial: Option<u8>,
+    pub owner: Pubkey,
+}
+
+impl Update {
+    /// META update at the close with the given price (expo -5) and confidence in bps.
+    pub fn meta(price: i64, conf_bps: u64) -> Self {
+        Self {
+            feed_id: feed_id(META_IDX),
+            price,
+            conf: (price as u64) * conf_bps / 10_000,
+            expo: EXPO,
+            publish_time: CLOSE,
+            partial: None,
+            owner: PYTH_RECEIVER_ID,
+        }
+    }
+    pub fn at(mut self, t: i64) -> Self {
+        self.publish_time = t;
+        self
+    }
+
+    pub fn bytes(&self) -> Vec<u8> {
+        let mut d = vec![];
+        d.extend_from_slice(&PRICE_UPDATE_V2_DISCRIMINATOR);
+        d.extend_from_slice(&[7u8; 32]); // write_authority
+        match self.partial {
+            None => d.push(1),
+            Some(n) => {
+                d.push(0);
+                d.push(n);
+            }
+        }
+        d.extend_from_slice(&self.feed_id);
+        d.extend_from_slice(&self.price.to_le_bytes());
+        d.extend_from_slice(&self.conf.to_le_bytes());
+        d.extend_from_slice(&self.expo.to_le_bytes());
+        d.extend_from_slice(&self.publish_time.to_le_bytes());
+        d.extend_from_slice(&(self.publish_time - 1).to_le_bytes()); // prev_publish_time
+        d.extend_from_slice(&self.price.to_le_bytes()); // ema_price
+        d.extend_from_slice(&self.conf.to_le_bytes()); // ema_conf
+        d.extend_from_slice(&1u64.to_le_bytes()); // posted_slot
+        d
+    }
+}
+
+impl Env {
+    /// Writes a price update account and returns its address.
+    pub fn put_update(&mut self, u: &Update) -> Pubkey {
+        let addr = Pubkey::new_unique();
+        self.svm
+            .set_account(
+                addr,
+                Account {
+                    lamports: 1_000_000_000,
+                    data: u.bytes(),
+                    owner: u.owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .unwrap();
+        addr
+    }
+
+    pub fn ticker_day(&self, td: &Pubkey) -> TickerDay {
+        self.fetch(td)
+    }
+
+    pub fn ix_record_close(
+        &self,
+        signer: &Pubkey,
+        td: &Pubkey,
+        update: &Pubkey,
+        official: Option<OfficialClose>,
+    ) -> Instruction {
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::RecordClose {
+                settler: *signer,
+                config: config_pda(),
+                ticker_day: *td,
+                price_update: *update,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::RecordClose { official }.data(),
+        }
+    }
+
+    /// `signer` records META's close from update `u` with an attested official close.
+    pub fn record_close_as(
+        &mut self,
+        signer: &Keypair,
+        u: &Update,
+        official: Option<i64>,
+    ) -> TxResult {
+        let addr = self.put_update(u);
+        let td = ticker_day_pda("META", DATE);
+        let official = official.map(|price| OfficialClose {
+            price,
+            expo: u.expo,
+        });
+        let ix = self.ix_record_close(&signer.pubkey(), &td, &addr, official);
+        self.send(&[ix], &[signer])
+    }
+
+    /// Settler records META with official close = the update's price.
+    pub fn record_close(&mut self, u: &Update) -> TxResult {
+        let s = self.settler.insecure_clone();
+        self.record_close_as(&s, u, Some(u.price))
+    }
+
+    pub fn ix_admin_settle(
+        &self,
+        signer: &Pubkey,
+        td: &Pubkey,
+        price: i64,
+        expo: i32,
+    ) -> Instruction {
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::AdminSettle {
+                admin: *signer,
+                config: config_pda(),
+                ticker_day: *td,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::AdminSettle { price, expo }.data(),
+        }
+    }
+
+    pub fn admin_settle_as(&mut self, signer: &Keypair, price: i64) -> TxResult {
+        let ix = self.ix_admin_settle(&signer.pubkey(), &ticker_day_pda("META", DATE), price, EXPO);
+        self.send(&[ix], &[signer])
+    }
+
+    pub fn ix_raise_dispute(&self, disputer: &Pubkey, td: &Pubkey, hash: [u8; 32]) -> Instruction {
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::RaiseDispute {
+                disputer: *disputer,
+                config: config_pda(),
+                ticker_day: *td,
+                dispute: dispute_pda(td),
+                disputer_usdc: ata(disputer, &self.usdc_mint),
+                bond_vault: self.config().bond_vault,
+                token_program: spl_token::ID,
+                system_program: solana_sdk::system_program::ID,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::RaiseDispute {
+                evidence_hash: hash,
+            }
+            .data(),
+        }
+    }
+
+    pub fn raise_dispute(&mut self, disputer: &Keypair) -> TxResult {
+        let ix =
+            self.ix_raise_dispute(&disputer.pubkey(), &ticker_day_pda("META", DATE), [9u8; 32]);
+        self.send(&[ix], &[disputer])
+    }
+
+    pub fn ix_resolve_dispute(&self, signer: &Pubkey, td: &Pubkey, r: Resolution) -> Instruction {
+        let d: Dispute = self.fetch(&dispute_pda(td));
+        let cfg = self.config();
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::ResolveDispute {
+                admin: *signer,
+                config: config_pda(),
+                ticker_day: *td,
+                dispute: dispute_pda(td),
+                bond_vault: cfg.bond_vault,
+                bond_authority: bond_authority(),
+                fee_vault: cfg.fee_vault,
+                disputer_usdc: ata(&d.disputer, &self.usdc_mint),
+                token_program: spl_token::ID,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::ResolveDispute { resolution: r }.data(),
+        }
+    }
+
+    pub fn resolve_dispute_as(&mut self, signer: &Keypair, r: Resolution) -> TxResult {
+        let ix = self.ix_resolve_dispute(&signer.pubkey(), &ticker_day_pda("META", DATE), r);
+        self.send(&[ix], &[signer])
+    }
+
+    /// finalize_close; passes the dispute accounts when a dispute exists.
+    pub fn ix_finalize_close(&self, td: &Pubkey) -> Instruction {
+        let dp = dispute_pda(td);
+        let cfg = self.config();
+        let none = meridian::ID;
+        let (dispute, bond_vault, bond_auth, disputer_usdc, tp) = if self.exists(&dp) {
+            let d: Dispute = self.fetch(&dp);
+            (
+                dp,
+                cfg.bond_vault,
+                bond_authority(),
+                ata(&d.disputer, &self.usdc_mint),
+                spl_token::ID,
+            )
+        } else {
+            (none, none, none, none, none)
+        };
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::FinalizeClose {
+                config: config_pda(),
+                ticker_day: *td,
+                dispute: Some(dispute),
+                bond_vault: Some(bond_vault),
+                bond_authority: Some(bond_auth),
+                disputer_usdc: Some(disputer_usdc),
+                token_program: Some(tp),
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::FinalizeClose {}.data(),
+        }
+    }
+
+    pub fn finalize_close_as(&mut self, signer: &Keypair) -> TxResult {
+        let ix = self.ix_finalize_close(&ticker_day_pda("META", DATE));
+        self.send(&[ix], &[signer])
+    }
+
+    pub fn finalize_close(&mut self) -> TxResult {
+        let p = self.payer.insecure_clone();
+        self.finalize_close_as(&p)
+    }
+
+    /// Happy path to FINAL: warp to close + 5 min, record `price` (conf 1 bp, expo -5),
+    /// warp past the dispute window and finalize.
+    pub fn close_at(&mut self, price: i64) {
+        self.close_with(Update::meta(price, 1));
+    }
+
+    pub fn close_with(&mut self, u: Update) {
+        if self.now() < CLOSE + 300 {
+            self.warp(CLOSE + 300);
+        }
+        self.record_close(&u).unwrap();
+        let t = self.now() + self.config().dispute_window_s;
+        self.warp(t);
+        self.finalize_close().unwrap();
+    }
+
+    pub fn ix_settle_market(&self, market: &Pubkey) -> Instruction {
+        let m = self.market(market);
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::SettleMarket {
+                ticker_day: m.ticker_day,
+                market: *market,
+                vault: m.vault,
+                yes_mint: m.yes_mint,
+                no_mint: m.no_mint,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::SettleMarket {}.data(),
+        }
+    }
+
+    pub fn settle_as(&mut self, signer: &Keypair, market: &Pubkey) -> TxResult {
+        let ix = self.ix_settle_market(market);
+        self.send(&[ix], &[signer])
+    }
+
+    pub fn settle(&mut self, market: &Pubkey) -> TxResult {
+        let p = self.payer.insecure_clone();
+        self.settle_as(&p, market)
+    }
+
+    pub fn admin_settle_market_as(
+        &mut self,
+        signer: &Keypair,
+        market: &Pubkey,
+        outcome: Outcome,
+    ) -> TxResult {
+        let m = self.market(market);
+        let ix = Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::AdminSettleMarket {
+                admin: signer.pubkey(),
+                config: config_pda(),
+                ticker_day: m.ticker_day,
+                market: *market,
+                vault: m.vault,
+                yes_mint: m.yes_mint,
+                no_mint: m.no_mint,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::AdminSettleMarket { outcome }.data(),
+        };
+        self.send(&[ix], &[signer])
+    }
+
+    pub fn void_market_as(&mut self, signer: &Keypair, market: &Pubkey) -> TxResult {
+        let m = self.market(market);
+        let ix = Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::VoidMarket {
+                admin: signer.pubkey(),
+                config: config_pda(),
+                market: *market,
+                vault: m.vault,
+                yes_mint: m.yes_mint,
+                no_mint: m.no_mint,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::VoidMarket {}.data(),
+        };
+        self.send(&[ix], &[signer])
+    }
+
+    pub fn ix_redeem_with(
+        &self,
+        user: &Pubkey,
+        market: &Pubkey,
+        user_yes: Pubkey,
+        user_no: Pubkey,
+        yes_n: u64,
+        no_n: u64,
+    ) -> Instruction {
+        let m = self.market(market);
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::Redeem {
+                user: *user,
+                config: config_pda(),
+                market: *market,
+                vault: m.vault,
+                yes_mint: m.yes_mint,
+                no_mint: m.no_mint,
+                user_yes,
+                user_no,
+                user_usdc: ata(user, &self.usdc_mint),
+                token_program: spl_token::ID,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::Redeem { yes_n, no_n }.data(),
+        }
+    }
+
+    pub fn ix_redeem(&self, user: &Pubkey, market: &Pubkey, yes_n: u64, no_n: u64) -> Instruction {
+        let m = self.market(market);
+        self.ix_redeem_with(
+            user,
+            market,
+            ata(user, &m.yes_mint),
+            ata(user, &m.no_mint),
+            yes_n,
+            no_n,
+        )
+    }
+
+    /// Redeem; creates the user's Yes and No ATAs first if they are missing.
+    pub fn redeem(&mut self, user: &Keypair, market: &Pubkey, yes_n: u64, no_n: u64) -> TxResult {
+        let m = self.market(market);
+        let mut ixs = vec![];
+        for mint in [m.yes_mint, m.no_mint] {
+            if !self.exists(&ata(&user.pubkey(), &mint)) {
+                ixs.push(
+                    spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+                        &user.pubkey(),
+                        &user.pubkey(),
+                        &mint,
+                        &spl_token::ID,
+                    ),
+                );
+            }
+        }
+        ixs.push(self.ix_redeem(&user.pubkey(), market, yes_n, no_n));
+        self.send(&ixs, &[user])
+    }
+
+    pub fn ix_prune(&self, market: &Pubkey, max: u16, remaining: &[Pubkey]) -> Instruction {
+        let m = self.market(market);
+        let mut accounts = meridian::accounts::PruneOrders {
+            ticker_day: m.ticker_day,
+            market: *market,
+            book: m.book,
+            base_vault: seeded(BASE_VAULT_SEED, market),
+            quote_vault: seeded(QUOTE_VAULT_SEED, market),
+            vault: m.vault,
+            yes_mint: m.yes_mint,
+            no_mint: m.no_mint,
+            token_program: spl_token::ID,
+            event_authority: event_authority(),
+            program: meridian::ID,
+        }
+        .to_account_metas(None);
+        for k in remaining {
+            accounts.push(solana_sdk::instruction::AccountMeta::new(*k, false));
+        }
+        Instruction {
+            program_id: meridian::ID,
+            accounts,
+            data: meridian::instruction::PruneOrders { max }.data(),
+        }
+    }
+
+    /// Every resting owner's ledger, plus the No ATA of every BUY_NO owner, in book order.
+    pub fn prune_accounts(&self, market: &Pubkey) -> Vec<Pubkey> {
+        let m = self.market(market);
+        let view = self.book(market);
+        let b = view.get();
+        let mut out: Vec<Pubkey> = vec![];
+        for side in [SIDE_BID, SIDE_ASK] {
+            for p in MIN_PRICE..=MAX_PRICE {
+                let l = b.level(side, p);
+                for o in &l.orders[..l.len as usize] {
+                    let k = ledger_pda(market, &o.owner);
+                    if !out.contains(&k) {
+                        out.push(k);
+                    }
+                    let n = ata(&o.owner, &m.no_mint);
+                    if o.tag == ORDER_TAG_BUY_NO && !out.contains(&n) {
+                        out.push(n);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    pub fn prune(&mut self, market: &Pubkey, max: u16) -> TxResult {
+        let accs = self.prune_accounts(market);
+        let ix = self.ix_prune(market, max, &accs);
+        let p = self.payer.insecure_clone();
+        self.send(&[budget(1_400_000), ix], &[&p])
+    }
+
+    pub fn ix_close_book(&self, market: &Pubkey) -> Instruction {
+        let m = self.market(market);
+        let cfg = self.config();
+        Instruction {
+            program_id: meridian::ID,
+            accounts: meridian::accounts::CloseBook {
+                config: config_pda(),
+                market: *market,
+                book: m.book,
+                rent_receiver: cfg.market_creator,
+                quote_vault: seeded(QUOTE_VAULT_SEED, market),
+                fee_vault: cfg.fee_vault,
+                token_program: spl_token::ID,
+                event_authority: event_authority(),
+                program: meridian::ID,
+            }
+            .to_account_metas(None),
+            data: meridian::instruction::CloseBook {}.data(),
+        }
+    }
+
+    pub fn close_book(&mut self, market: &Pubkey) -> TxResult {
+        let ix = self.ix_close_book(market);
+        let p = self.payer.insecure_clone();
+        self.send(&[ix], &[&p])
+    }
+
+    /// Total USDC in every wallet, ledger-free balance excluded (those sit in vaults).
+    pub fn usdc_of(&self, owner: &Pubkey) -> u64 {
+        self.token_balance(&ata(owner, &self.usdc_mint))
+    }
+}
+
+pub fn budget(units: u32) -> Instruction {
+    solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(units)
 }

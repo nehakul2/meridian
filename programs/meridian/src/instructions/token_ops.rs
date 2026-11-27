@@ -1,6 +1,6 @@
 //! Small SPL Token CPI helpers and the Market PDA signer shared by the trade paths.
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Burn, MintTo, Transfer};
+use anchor_spl::token::{self, Approve, Burn, MintTo, Transfer};
 
 use crate::constants::*;
 use crate::state::Market;
@@ -63,6 +63,55 @@ pub fn transfer<'a>(
         }
         None => token::transfer(CpiContext::new(token_program.clone(), accs), amount),
     }
+}
+
+/// Transfer signed by an arbitrary program PDA (the bond authority, MER-37).
+pub fn transfer_signed<'a>(
+    token_program: &AccountInfo<'a>,
+    from: &AccountInfo<'a>,
+    to: &AccountInfo<'a>,
+    authority: &AccountInfo<'a>,
+    seeds: &[&[u8]],
+    amount: u64,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+    token::transfer(
+        CpiContext::new_with_signer(
+            token_program.clone(),
+            Transfer {
+                from: from.clone(),
+                to: to.clone(),
+                authority: authority.clone(),
+            },
+            &[seeds],
+        ),
+        amount,
+    )
+}
+
+/// The owner (signing) approves `delegate` to move up to `amount` from `account`.
+/// Used by buy_no_limit so `prune_orders` can convert an unfilled BUY_NO order's Yes and
+/// the owner's No to USDC after close without the owner signing (D15, MER-35).
+pub fn approve<'a>(
+    token_program: &AccountInfo<'a>,
+    account: &AccountInfo<'a>,
+    delegate: &AccountInfo<'a>,
+    owner: &AccountInfo<'a>,
+    amount: u64,
+) -> Result<()> {
+    token::approve(
+        CpiContext::new(
+            token_program.clone(),
+            Approve {
+                to: account.clone(),
+                delegate: delegate.clone(),
+                authority: owner.clone(),
+            },
+        ),
+        amount,
+    )
 }
 
 pub fn mint_to<'a>(

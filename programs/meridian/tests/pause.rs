@@ -1,7 +1,7 @@
 //! MER-15 · pause and unpause scope (D30).
 //! Matrix: PSE-01 .. PSE-05. Phase 2 adds the order halves (place_order, buy_no_*,
 //! sell_no blocked; cancel_order, cancel_all, withdraw allowed; place_order restored).
-//! The settle, redeem and prune halves of PSE-03 land with MER-31 to MER-35.
+//! Phase 3 adds PSE-03: record, finalize, settle, prune, close_book and redeem while paused.
 mod common;
 
 use common::*;
@@ -155,4 +155,27 @@ fn pse_04_unpause_restores_orders() {
     );
     env.set_paused(&admin, false).unwrap();
     env.bid(&alice, &m, 40, 1, TimeInForce::Gtc).unwrap();
+}
+
+#[test]
+fn pse_03_settlement_and_redemption_work_while_paused() {
+    // Paused across 16:00 (D30): record_close, finalize, settle_market, prune_orders,
+    // close_book, withdraw and redeem all succeed; settlement is not delayed.
+    let (mut env, m) = Env::with_market();
+    env.warp(OPEN);
+    let bob = env.user_with_yes(&m, 0, 10);
+    env.ask(&bob, &m, 60, 10, TimeInForce::Gtc).unwrap();
+    let admin = env.admin.insecure_clone();
+    env.set_paused(&admin, true).unwrap();
+    env.warp(CLOSE + 300);
+    env.record_close(&Update::meta(px(68_500), 1)).unwrap();
+    env.warp(CLOSE + 300 + 1_200);
+    env.finalize_close().unwrap();
+    env.settle(&m).unwrap();
+    env.prune(&m, 10).unwrap();
+    env.close_book(&m).unwrap();
+    env.withdraw(&bob, &m).unwrap();
+    env.redeem(&bob, &m, 10, 10).unwrap();
+    assert!(env.config().paused);
+    assert_eq!(env.usdc_of(&bob.pubkey()), 10 * USDC);
 }
