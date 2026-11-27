@@ -17,7 +17,7 @@ jobs:
           - { name: baseline, node: 22, opts: "", err: "" }
           - { name: no-pretenuring, node: 22, opts: "--no-allocation-site-pretenuring", err: "" }
           - { name: err-string, node: 22, opts: "", err: "string" }
-          - { name: err-none, node: 22, opts: "", err: "none" }
+          - { name: node24-full, node: 24, opts: "", err: "", files: "test" }
           - { name: node20, node: 20, opts: "", err: "" }
           - { name: node24, node: 24, opts: "", err: "" }
           - { name: malloc-check, node: 22, opts: "", err: "", malloc: "1" }
@@ -59,9 +59,11 @@ jobs:
           if [ "${{ matrix.malloc }}" = "1" ]; then
             export LD_PRELOAD=/lib/x86_64-linux-gnu/libc_malloc_debug.so.0 MALLOC_CHECK_=3
           fi
+          set +e
           rc=0
+          files="${{ matrix.files }}"
           for i in 1 2 3; do
-            npx vitest run test/settler.test.ts --reporter=verbose > out.$i.log 2>&1; r=$?
+            npx vitest run ${files:-test/settler.test.ts} --reporter=verbose > out.$i.log 2>&1; r=$?
             echo "run $i exit $r"; grep -E "✓|×|bad_alloc|free\(\)|corrupt|Tests " out.$i.log | tail -25
             [ $r -ne 0 ] && rc=1
           done
