@@ -4,7 +4,7 @@ ANCHOR_VERSION := 0.31.1
 PROGRAM_DIR    := programs/meridian
 IDL            := $(PROGRAM_DIR)/idl/meridian.json
 
-.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build
+.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test
 
 doctor:
 	@./scripts/doctor.sh $(SOLANA_VERSION) $(ANCHOR_VERSION)
@@ -45,3 +45,8 @@ automation-test: build
 
 automation-build:
 	cd services/automation && npm ci && npm run build
+
+# Indexer and PG Writer (Phase 5): no program build needed, they run on the recorded fixture.
+data-test:
+	cd services/indexer && npm ci && npm run typecheck && npm test
+	cd services/pg-writer && npm ci && npm run typecheck && npm test

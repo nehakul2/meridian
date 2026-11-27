@@ -1,0 +1,37 @@
+name: indexer
+
+on:
+  pull_request:
+    paths: ["services/indexer/**", "services/shared/**", "programs/meridian/idl/**", ".github/workflows/indexer.yml"]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: services/indexer/package-lock.json
+      - run: npm ci
+        working-directory: services/indexer
+      - run: npm run typecheck
+        working-directory: services/indexer
+      # Decoder, projector and leader suites run on the recorded fixture
+      # (test/fixtures/day.json, re-recorded with `npm run fixture:record`).
+      - name: Tests (decoder, Redis projector, leader)
+        run: npx vitest run
+        working-directory: services/indexer
+        env:
+          TEST_REDIS_URL: redis://localhost:6379
+          REQUIRE_REDIS: "1"

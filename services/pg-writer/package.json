@@ -1,0 +1,26 @@
+{
+  "name": "@meridian/pg-writer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Meridian PG Writer (C7): idempotent md:events consumer, gap detection, reorg handling, positions and P&L",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/pg-writer/src/main.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.8.2",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
