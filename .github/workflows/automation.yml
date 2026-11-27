@@ -1,0 +1,59 @@
+name: automation
+
+on:
+  pull_request:
+    paths: ["services/automation/**", "db/migrations/**", "programs/meridian/idl/**", "programs/**", ".github/workflows/automation.yml"]
+  push:
+    branches: [main]
+
+env:
+  SOLANA_VERSION: v2.3.13
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache Solana CLI and platform tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/solana-release
+            ~/.cache/solana
+          key: solana-${{ env.SOLANA_VERSION }}
+      - name: Install Solana CLI
+        run: |
+          if [ ! -x ~/solana-release/bin/cargo-build-sbf ]; then
+            curl -sSfL -o /tmp/solana.tar.bz2 "https://github.com/anza-xyz/agave/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+            tar xjf /tmp/solana.tar.bz2 -C ~
+          fi
+          echo "$HOME/solana-release/bin" >> "$GITHUB_PATH"
+      # The LiteSVM suites run the real program, so build it first.
+      - run: make build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/automation/package-lock.json
+      - run: npm ci
+        working-directory: services/automation
+      - run: npm run typecheck
+        working-directory: services/automation
+      - name: Tests (unit, Postgres, LiteSVM)
+        run: npm test
+        working-directory: services/automation
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          REQUIRE_PROGRAM: "1"
+          REQUIRE_PG: "1"

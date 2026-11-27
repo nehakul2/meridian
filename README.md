@@ -16,9 +16,10 @@ files, not in this repo. This repo follows their layout and naming: program test
 | 1 · Program core | MER-10 to MER-15 | Built: config and roles, ticker-days, strike markets, mint/merge, invariants with a property harness, pause |
 | 2 · Order book and trade paths | MER-20 to MER-25 | Built: zero-copy order book with halt at close, Buy/Sell Yes, Buy No market and limit, Sell No, cancel, withdraw, taker fee. Phoenix fallback not needed |
 | 3 · Settlement, redeem, cleanup | MER-30 to MER-37 | Built: official close with the Pyth cross-check, admin override, dispute window, per-strike settle, redeem, void, prune (with the BUY_NO conversion) and close_book |
-| 4 · Automation service | MER-40 onwards | Next |
+| 4 · Automation service | MER-40 to MER-49 | Built: calendar, dynamic strikes and frozen inputs, Hermes client, morning job, settler (two-vendor official close), finalize / strike / prune / close-book cranks, scheduler with single-runner lock, nightly reconcile. MER-48 spike script written, not yet run |
+| 5 · Indexer and PG Writer | MER-50 onwards | Next |
 
-See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md) and [docs/phase3-coverage.md](docs/phase3-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 and 3 also list their contract changes and the choices made where the spec was silent.
+See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md) and [docs/phase4-coverage.md](docs/phase4-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 4 also list their contract changes and the choices made where the spec was silent.
 
 ## Quick start
 
@@ -37,7 +38,23 @@ make idl-check    # fails if the IDL drifts from programs/meridian/idl/meridian.
 make prop SEED=…  # replay one failing property sequence
 ```
 
-`make dev` (local validator, Postgres, Redis and services) arrives with the services in Phase 4.
+### Automation service (Phase 4)
+
+Node 22. The LiteSVM suites load `target/deploy/meridian.so`, so build the program first.
+The Postgres suite starts a throwaway local cluster, or uses `TEST_DATABASE_URL`.
+
+```sh
+make automation-test                     # build the program, then typecheck + all service tests
+cd services/automation
+npm test                                 # unit, Postgres and LiteSVM suites (~8 s)
+node dist/src/main.js migrate            # apply db/migrations (DATABASE_URL)
+node dist/src/main.js calendar-load 2027 # fill trading_calendar for a year
+node dist/src/main.js run SETTLE 2026-11-25   # manual rerun of an idempotent job
+node dist/src/main.js                    # scheduler loop
+```
+
+Configuration is in `.env.example` (own RPC endpoint and keys: fee payer, `market_creator`,
+`settler`; never admin). `services/automation/Dockerfile` builds the deployment image.
 
 ### Dependency pins
 
