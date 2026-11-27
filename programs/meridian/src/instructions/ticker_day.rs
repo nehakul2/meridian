@@ -70,6 +70,7 @@ pub fn create_ticker_day(
         ref_publish_time: 0,
         recorded_by: Pubkey::default(),
         strike_count: 0,
+        finalized_at: 0,
         bump: ctx.bumps.ticker_day,
     });
     Ok(())

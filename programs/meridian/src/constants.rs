@@ -8,6 +8,10 @@ pub const LEDGER_SEED: &[u8] = b"ledger";
 pub const YES_MINT_SEED: &[u8] = b"yes";
 pub const NO_MINT_SEED: &[u8] = b"no";
 pub const VAULT_SEED: &[u8] = b"vault";
+pub const DISPUTE_SEED: &[u8] = b"dispute";
+/// PDA that owns the dispute bond vault (`Config.bond_vault`), so the program can return
+/// or forward a bond (MER-37).
+pub const BOND_AUTHORITY_SEED: &[u8] = b"bond";
 
 /// Number of tickers held in `Config` (MAG7).
 pub const MAX_TICKERS: usize = 7;
@@ -56,3 +60,18 @@ pub const MAX_ORDER_QTY: u64 = 1_000_000;
 /// A program-owned account can grow by at most 10 KiB per instruction, so the book is
 /// created at this size and grown to full size by `grow_book` (MER-20).
 pub const BOOK_GROWTH_STEP: usize = 10_240;
+
+// Settlement (MER-30 to MER-37).
+/// Pyth Solana Receiver program: owner of every verified `PriceUpdateV2` account (A2).
+pub const PYTH_RECEIVER_ID: anchor_lang::prelude::Pubkey =
+    anchor_lang::pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
+/// Anchor discriminator of `PriceUpdateV2`: sha256("account:PriceUpdateV2")[..8].
+pub const PRICE_UPDATE_V2_DISCRIMINATOR: [u8; 8] = [34, 241, 35, 99, 157, 126, 244, 205];
+/// Price exponents accepted anywhere a price is written. Keeps every i128 comparison in
+/// `settlement.rs` far from overflow (|i64| x 10^20 < 2^127).
+pub const MIN_EXPO: i32 = -18;
+pub const MAX_EXPO: i32 = 10;
+/// Strike exponent: strikes are whole cents.
+pub const STRIKE_EXPO: i32 = -2;
+/// Upper bound on one `prune_orders` call, so a call always fits the compute budget.
+pub const MAX_PRUNE_BATCH: u16 = 64;

@@ -718,6 +718,16 @@ pub fn buy_no_limit<'info>(
             OrderTag::BuyNo,
             0,
         )?;
+        // Let the Market PDA burn the No that pairs with the resting Yes, so a
+        // permissionless prune after close can convert both to USDC (D15, MER-35).
+        // Set to all of this user's unfilled BUY_NO quantity in the market.
+        approve(
+            &tp,
+            &a.user_no.to_account_info(),
+            &a.market.to_account_info(),
+            &a.user.to_account_info(),
+            a.ledger.pending_buy_no,
+        )?;
     }
     check_all(a, true)
 }

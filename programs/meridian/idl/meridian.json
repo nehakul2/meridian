@@ -247,6 +247,190 @@
       ]
     },
     {
+      "name": "admin_settle",
+      "docs": [
+        "Admin only, from close_time + override_delay_s while the close is unrecorded."
+      ],
+      "discriminator": [
+        138,
+        218,
+        221,
+        118,
+        96,
+        220,
+        75,
+        11
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticker_day",
+          "writable": true
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "price",
+          "type": "i64"
+        },
+        {
+          "name": "expo",
+          "type": "i32"
+        }
+      ]
+    },
+    {
+      "name": "admin_settle_market",
+      "docs": [
+        "Admin only. Settles a strike that settle_market refused (confidence band)."
+      ],
+      "discriminator": [
+        120,
+        28,
+        6,
+        83,
+        85,
+        98,
+        56,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticker_day"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "yes_mint"
+        },
+        {
+          "name": "no_mint"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "outcome",
+          "type": {
+            "defined": {
+              "name": "Outcome"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "buy_no_limit",
       "docs": [
         "Buy No limit: mint `qty` pairs and offer the Yes at `yes_price`, tagged BUY_NO."
@@ -1425,6 +1609,105 @@
       ]
     },
     {
+      "name": "close_book",
+      "docs": [
+        "Permissionless. Closes an empty, settled book; rent to the automation wallet."
+      ],
+      "discriminator": [
+        216,
+        209,
+        72,
+        159,
+        209,
+        206,
+        135,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "book",
+          "writable": true
+        },
+        {
+          "name": "rent_receiver",
+          "docs": [
+            "The automation wallet (D28, D29): the market creator key, which pays for books."
+          ],
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "docs": [
+            "Checked against `book.quote_vault`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "fee_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "create_strike_market",
       "docs": [
         "market_creator only; idempotent."
@@ -1758,6 +2041,139 @@
           "type": "i64"
         }
       ]
+    },
+    {
+      "name": "finalize_close",
+      "docs": [
+        "Permissionless. PROVISIONAL past the window, or DISPUTED past the deadline -> FINAL."
+      ],
+      "discriminator": [
+        9,
+        206,
+        42,
+        67,
+        232,
+        143,
+        165,
+        246
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticker_day",
+          "writable": true
+        },
+        {
+          "name": "dispute",
+          "docs": [
+            "The accounts below are needed only on the deadline path (DISPUTED)."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  112,
+                  117,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticker_day"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bond_vault",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "bond_authority",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "disputer_usdc",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "optional": true,
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "grow_book",
@@ -2893,6 +3309,595 @@
       ]
     },
     {
+      "name": "prune_orders",
+      "docs": [
+        "Permissionless, after close_time. Cancels up to `max` resting orders to ledgers."
+      ],
+      "discriminator": [
+        27,
+        213,
+        159,
+        191,
+        12,
+        116,
+        112,
+        121
+      ],
+      "accounts": [
+        {
+          "name": "ticker_day"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "book",
+          "writable": true
+        },
+        {
+          "name": "base_vault",
+          "docs": [
+            "Checked against `book.base_vault`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "quote_vault",
+          "docs": [
+            "Checked against `book.quote_vault`."
+          ],
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "max",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "raise_dispute",
+      "docs": [
+        "Anyone, during the dispute window, with the configured USDC bond."
+      ],
+      "discriminator": [
+        41,
+        243,
+        1,
+        51,
+        150,
+        95,
+        246,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "disputer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticker_day",
+          "writable": true
+        },
+        {
+          "name": "dispute",
+          "docs": [
+            "One per ticker-day: a second `init` fails (DSP-02)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  112,
+                  117,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticker_day"
+              }
+            ]
+          }
+        },
+        {
+          "name": "disputer_usdc",
+          "writable": true
+        },
+        {
+          "name": "bond_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "evidence_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_close",
+      "docs": [
+        "Settler only. Records the official close (D3), cross-checked against a fully",
+        "verified Pyth update stamped in [close_time, close_time + settle_window_s].",
+        "`official` is required in ATTESTED_CHECKED mode and refused in ORACLE_OFFICIAL."
+      ],
+      "discriminator": [
+        224,
+        89,
+        94,
+        71,
+        158,
+        164,
+        43,
+        199
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticker_day",
+          "writable": true
+        },
+        {
+          "name": "price_update",
+          "docs": [
+            "level are checked by `settlement::read_price_update`."
+          ]
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "official",
+          "type": {
+            "option": {
+              "defined": {
+                "name": "OfficialClose"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "redeem",
+      "docs": [
+        "Burn tokens for their settled value. SETTLED or VOID; works forever."
+      ],
+      "discriminator": [
+        184,
+        12,
+        86,
+        149,
+        70,
+        196,
+        97,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "user_yes",
+          "docs": [
+            "Mint checked: tokens of another market are refused (SEC-04)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "user_no",
+          "writable": true
+        },
+        {
+          "name": "user_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "yes_n",
+          "type": "u64"
+        },
+        {
+          "name": "no_n",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "resolve_dispute",
+      "docs": [
+        "Admin only, before the resolution deadline. Uphold or correct (once)."
+      ],
+      "discriminator": [
+        231,
+        6,
+        202,
+        6,
+        96,
+        103,
+        12,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "ticker_day",
+          "writable": true
+        },
+        {
+          "name": "dispute",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  112,
+                  117,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "ticker_day"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bond_vault",
+          "writable": true
+        },
+        {
+          "name": "bond_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  110,
+                  100
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_vault",
+          "docs": [
+            "Uphold: the bond goes here."
+          ],
+          "writable": true
+        },
+        {
+          "name": "disputer_usdc",
+          "docs": [
+            "Correct: the bond goes back here."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "resolution",
+          "type": {
+            "defined": {
+              "name": "Resolution"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "sell_no",
       "docs": [
         "Sell No: buy Yes up to `max_yes_price` (IOC, capped at `qty`) and merge it."
@@ -3239,6 +4244,73 @@
       ]
     },
     {
+      "name": "settle_market",
+      "docs": [
+        "Permissionless. Settles one strike from its ticker-day's FINAL price."
+      ],
+      "discriminator": [
+        193,
+        153,
+        95,
+        216,
+        166,
+        6,
+        144,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "ticker_day"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "yes_mint"
+        },
+        {
+          "name": "no_mint"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "sweep_fees",
       "docs": [
         "Permissionless. Moves a market's accrued taker fees to Config.fee_vault."
@@ -3453,6 +4525,92 @@
       ]
     },
     {
+      "name": "void_market",
+      "docs": [
+        "Admin only, zero trades. Yes and No each redeem for $0.50."
+      ],
+      "discriminator": [
+        243,
+        175,
+        46,
+        124,
+        95,
+        101,
+        39,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "vault"
+        },
+        {
+          "name": "yes_mint"
+        },
+        {
+          "name": "no_mint"
+        },
+        {
+          "name": "event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "withdraw",
       "docs": [
         "Ledger free USDC and Yes to the owner's token accounts. Always allowed."
@@ -3497,6 +4655,9 @@
         },
         {
           "name": "book",
+          "docs": [
+            "no longer exists and withdraw works from the ledger alone (CLN-06)."
+          ],
           "writable": true
         },
         {
@@ -3694,6 +4855,19 @@
         250,
         204,
         130
+      ]
+    },
+    {
+      "name": "Dispute",
+      "discriminator": [
+        36,
+        49,
+        241,
+        67,
+        40,
+        36,
+        241,
+        74
       ]
     },
     {
@@ -4135,6 +5309,146 @@
       "code": 6029,
       "name": "InsufficientFunds",
       "msg": "Not enough USDC"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidOraclePrice",
+      "msg": "Price must be greater than zero"
+    },
+    {
+      "code": 6031,
+      "name": "InvalidExpo",
+      "msg": "Price exponent out of range"
+    },
+    {
+      "code": 6032,
+      "name": "InvalidOracleAccount",
+      "msg": "Oracle account is not a Pyth PriceUpdateV2 owned by the Pyth receiver"
+    },
+    {
+      "code": 6033,
+      "name": "OracleNotFullyVerified",
+      "msg": "Oracle update is not fully verified"
+    },
+    {
+      "code": 6034,
+      "name": "FeedMismatch",
+      "msg": "Oracle feed id does not match the ticker"
+    },
+    {
+      "code": 6035,
+      "name": "PublishTimeOutsideWindow",
+      "msg": "Oracle publish_time is outside [close_time, close_time + settle_window_s]"
+    },
+    {
+      "code": 6036,
+      "name": "ConfidenceTooWide",
+      "msg": "Oracle confidence is wider than conf_bps_max"
+    },
+    {
+      "code": 6037,
+      "name": "CrossCheckFailed",
+      "msg": "Official close is outside the tolerance of the oracle reference"
+    },
+    {
+      "code": 6038,
+      "name": "ExpoMismatch",
+      "msg": "Official close exponent must match the reference update"
+    },
+    {
+      "code": 6039,
+      "name": "OfficialCloseRequired",
+      "msg": "This close source mode needs an attested official close"
+    },
+    {
+      "code": 6040,
+      "name": "OfficialCloseNotAllowed",
+      "msg": "ORACLE_OFFICIAL mode reads the feed; an attested value is refused"
+    },
+    {
+      "code": 6041,
+      "name": "CloseNotReached",
+      "msg": "Not yet: now < close_time"
+    },
+    {
+      "code": 6042,
+      "name": "OverrideTooEarly",
+      "msg": "Admin override not yet allowed: now < close_time + override_delay_s"
+    },
+    {
+      "code": 6043,
+      "name": "TickerDayNotFinal",
+      "msg": "Ticker-day close is not FINAL"
+    },
+    {
+      "code": 6044,
+      "name": "ConfidenceStraddle",
+      "msg": "Confidence band straddles the strike; this strike goes to the admin path"
+    },
+    {
+      "code": 6045,
+      "name": "NotInConfidenceBand",
+      "msg": "Strike is outside the confidence band; use settle_market"
+    },
+    {
+      "code": 6046,
+      "name": "MarketNotSettled",
+      "msg": "Market is not settled or void"
+    },
+    {
+      "code": 6047,
+      "name": "MarketHasTrades",
+      "msg": "Market has trades and cannot be voided"
+    },
+    {
+      "code": 6048,
+      "name": "NotProvisional",
+      "msg": "Ticker-day close is not PROVISIONAL"
+    },
+    {
+      "code": 6049,
+      "name": "NotDisputed",
+      "msg": "Ticker-day close is not DISPUTED"
+    },
+    {
+      "code": 6050,
+      "name": "DisputeWindowClosed",
+      "msg": "Dispute window has closed"
+    },
+    {
+      "code": 6051,
+      "name": "DisputeWindowOpen",
+      "msg": "Dispute window is still open"
+    },
+    {
+      "code": 6052,
+      "name": "ResolutionDeadlinePassed",
+      "msg": "Dispute resolution deadline has passed"
+    },
+    {
+      "code": 6053,
+      "name": "ResolutionDeadlineNotReached",
+      "msg": "Dispute resolution deadline has not passed"
+    },
+    {
+      "code": 6054,
+      "name": "InvalidBondVault",
+      "msg": "Bond vault must be a USDC account owned by the bond authority PDA"
+    },
+    {
+      "code": 6055,
+      "name": "PruneNotAllowed",
+      "msg": "Orders can be pruned only after close_time or once settled or void"
+    },
+    {
+      "code": 6056,
+      "name": "BookNotEmpty",
+      "msg": "Order book still has resting orders"
+    },
+    {
+      "code": 6057,
+      "name": "BookClosed",
+      "msg": "Order book account is closed"
     }
   ],
   "types": [
@@ -4561,6 +5875,54 @@
                 }
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Dispute",
+      "docs": [
+        "One dispute per ticker-day (D8, MER-37). `init` on `[\"dispute\", ticker_day]` is what",
+        "makes a second dispute impossible."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticker_day",
+            "type": "pubkey"
+          },
+          {
+            "name": "disputer",
+            "type": "pubkey"
+          },
+          {
+            "name": "bond",
+            "docs": [
+              "Bond taken at raise time (config may change later)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "raised_at",
+            "type": "i64"
+          },
+          {
+            "name": "evidence_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolved",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -5110,6 +6472,25 @@
       }
     },
     {
+      "name": "OfficialClose",
+      "docs": [
+        "The attested official closing-auction price (D3), at the reference update's exponent."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "price",
+            "type": "i64"
+          },
+          {
+            "name": "expo",
+            "type": "i32"
+          }
+        ]
+      }
+    },
+    {
       "name": "OrderBook",
       "docs": [
         "Zero-copy order book (MER-20, spec 4.1): 99 Yes price levels per side.",
@@ -5494,6 +6875,30 @@
       }
     },
     {
+      "name": "Resolution",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Uphold"
+          },
+          {
+            "name": "Correct",
+            "fields": [
+              {
+                "name": "price",
+                "type": "i64"
+              },
+              {
+                "name": "expo",
+                "type": "i32"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "Side",
       "type": {
         "kind": "enum",
@@ -5620,6 +7025,14 @@
           {
             "name": "strike_count",
             "type": "u32"
+          },
+          {
+            "name": "finalized_at",
+            "docs": [
+              "When the close became FINAL (D18): the on-chain settlement timestamp, kept apart",
+              "from the provisional `recorded_at` the UI shows first."
+            ],
+            "type": "i64"
           },
           {
             "name": "bump",

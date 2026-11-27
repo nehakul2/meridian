@@ -113,6 +113,9 @@ pub struct TickerDay {
     pub ref_publish_time: i64,
     pub recorded_by: Pubkey,
     pub strike_count: u32,
+    /// When the close became FINAL (D18): the on-chain settlement timestamp, kept apart
+    /// from the provisional `recorded_at` the UI shows first.
+    pub finalized_at: i64,
     pub bump: u8,
 }
 
@@ -247,6 +250,21 @@ pub struct UserLedger {
     pub locked_yes: u64,
     pub open_order_count: u32,
     pub pending_buy_no: u64,
+    pub bump: u8,
+}
+
+/// One dispute per ticker-day (D8, MER-37). `init` on `["dispute", ticker_day]` is what
+/// makes a second dispute impossible.
+#[account]
+#[derive(InitSpace, Debug)]
+pub struct Dispute {
+    pub ticker_day: Pubkey,
+    pub disputer: Pubkey,
+    /// Bond taken at raise time (config may change later).
+    pub bond: u64,
+    pub raised_at: i64,
+    pub evidence_hash: [u8; 32],
+    pub resolved: bool,
     pub bump: u8,
 }
 

@@ -62,4 +62,61 @@ pub enum MeridianError {
     MakerLedgerMissing,
     #[msg("Not enough USDC")]
     InsufficientFunds,
+    // ---- Phase 3: settlement, redeem, cleanup ----
+    #[msg("Price must be greater than zero")]
+    InvalidOraclePrice,
+    #[msg("Price exponent out of range")]
+    InvalidExpo,
+    #[msg("Oracle account is not a Pyth PriceUpdateV2 owned by the Pyth receiver")]
+    InvalidOracleAccount,
+    #[msg("Oracle update is not fully verified")]
+    OracleNotFullyVerified,
+    #[msg("Oracle feed id does not match the ticker")]
+    FeedMismatch,
+    #[msg("Oracle publish_time is outside [close_time, close_time + settle_window_s]")]
+    PublishTimeOutsideWindow,
+    #[msg("Oracle confidence is wider than conf_bps_max")]
+    ConfidenceTooWide,
+    #[msg("Official close is outside the tolerance of the oracle reference")]
+    CrossCheckFailed,
+    #[msg("Official close exponent must match the reference update")]
+    ExpoMismatch,
+    #[msg("This close source mode needs an attested official close")]
+    OfficialCloseRequired,
+    #[msg("ORACLE_OFFICIAL mode reads the feed; an attested value is refused")]
+    OfficialCloseNotAllowed,
+    #[msg("Not yet: now < close_time")]
+    CloseNotReached,
+    #[msg("Admin override not yet allowed: now < close_time + override_delay_s")]
+    OverrideTooEarly,
+    #[msg("Ticker-day close is not FINAL")]
+    TickerDayNotFinal,
+    #[msg("Confidence band straddles the strike; this strike goes to the admin path")]
+    ConfidenceStraddle,
+    #[msg("Strike is outside the confidence band; use settle_market")]
+    NotInConfidenceBand,
+    #[msg("Market is not settled or void")]
+    MarketNotSettled,
+    #[msg("Market has trades and cannot be voided")]
+    MarketHasTrades,
+    #[msg("Ticker-day close is not PROVISIONAL")]
+    NotProvisional,
+    #[msg("Ticker-day close is not DISPUTED")]
+    NotDisputed,
+    #[msg("Dispute window has closed")]
+    DisputeWindowClosed,
+    #[msg("Dispute window is still open")]
+    DisputeWindowOpen,
+    #[msg("Dispute resolution deadline has passed")]
+    ResolutionDeadlinePassed,
+    #[msg("Dispute resolution deadline has not passed")]
+    ResolutionDeadlineNotReached,
+    #[msg("Bond vault must be a USDC account owned by the bond authority PDA")]
+    InvalidBondVault,
+    #[msg("Orders can be pruned only after close_time or once settled or void")]
+    PruneNotAllowed,
+    #[msg("Order book still has resting orders")]
+    BookNotEmpty,
+    #[msg("Order book account is closed")]
+    BookClosed,
 }

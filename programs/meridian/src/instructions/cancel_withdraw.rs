@@ -251,8 +251,10 @@ pub struct Withdraw<'info> {
     )]
     pub market: Box<Account<'info, Market>>,
 
+    /// CHECK: the market's order book (address checked). After `close_book` (MER-35) it
+    /// no longer exists and withdraw works from the ledger alone (CLN-06).
     #[account(mut, address = market.book @ MeridianError::AccountMismatch)]
-    pub book: AccountLoader<'info, OrderBook>,
+    pub book: UncheckedAccount<'info>,
 
     /// Seeds bind the ledger to the signer: nobody can withdraw another user's ledger (SEC-03).
     #[account(
@@ -294,8 +296,11 @@ pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
     let mut em = Emitter::new(a.event_authority.to_account_info(), bump);
     let mut bal = Balances::of(&a.ledger);
     let (usdc, yes) = (bal.free_usdc, bal.free_yes);
-    {
-        let mut bk = a.book.load_mut()?;
+    let book_info = a.book.to_account_info();
+    let open = book_open(&book_info);
+    if open {
+        let mut data = book_info.try_borrow_mut_data()?;
+        let bk: &mut OrderBook = bytemuck::from_bytes_mut(&mut data[8..OrderBook::LEN]);
         require_keys_eq!(
             bk.base_vault,
             a.base_vault.key(),
@@ -307,6 +312,17 @@ pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
             MeridianError::AccountMismatch
         );
         bk.take_free(&mut bal, usdc, yes)?;
+    } else {
+        // Book closed: no orders, so only free balances remain. The vaults are the
+        // market's PDAs; the ledger is the whole claim on them.
+        let mkey = a.market.key();
+        let (base, _) = Pubkey::find_program_address(&[BASE_VAULT_SEED, mkey.as_ref()], &crate::ID);
+        let (quote, _) =
+            Pubkey::find_program_address(&[QUOTE_VAULT_SEED, mkey.as_ref()], &crate::ID);
+        require_keys_eq!(base, a.base_vault.key(), MeridianError::AccountMismatch);
+        require_keys_eq!(quote, a.quote_vault.key(), MeridianError::AccountMismatch);
+        bal.free_usdc = 0;
+        bal.free_yes = 0;
     }
     bal.store(&mut a.ledger);
     let tp = a.token_program.to_account_info();
@@ -339,10 +355,24 @@ pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
         usdc,
         yes,
     })?;
-    a.base_vault.reload()?;
-    a.quote_vault.reload()?;
-    let bk = a.book.load()?;
-    assert_book_escrow(a.base_vault.amount, a.quote_vault.amount, &bk)
+    if open {
+        a.base_vault.reload()?;
+        a.quote_vault.reload()?;
+        let data = book_info.try_borrow_data()?;
+        let bk: &OrderBook = bytemuck::from_bytes(&data[8..OrderBook::LEN]);
+        assert_book_escrow(a.base_vault.amount, a.quote_vault.amount, bk)?;
+    }
+    Ok(())
+}
+
+/// True while the order book account exists and is fully grown.
+fn book_open(info: &AccountInfo) -> bool {
+    info.owner == &crate::ID
+        && info.data_len() == OrderBook::LEN
+        && info
+            .try_borrow_data()
+            .map(|d| d[..8] == *OrderBook::DISCRIMINATOR)
+            .unwrap_or(false)
 }
 
 #[event_cpi]

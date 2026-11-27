@@ -1,13 +1,14 @@
 //! MER-14 · invariant assertions and property test harness.
 //!
-//! Matrix: INV-01 to INV-09, MNT-11, SET-11, CON-02, CON-03, CON-04, CON-08, CON-09.
+//! Matrix: INV-01 to INV-09, MNT-11, SET-11, CON-02 to CON-05, CON-08, CON-09.
 //! The generator covers mint / merge / donate / pause / clock / token transfer and,
 //! since Phase 2, place_order (GTC, IOC, POST_ONLY), cancel_order, cancel_all,
 //! buy_no_market, buy_no_limit, sell_no and withdraw with a 25 bps taker fee. After
 //! every step it checks the market invariants, book escrow (INV-05) and that the book's
 //! running totals equal the sum of the ledgers, token and USDC conservation, and that
-//! supply moves only with PairMinted / PairMerged events. Settle, redeem and prune join
-//! with MER-30 to MER-35 (CON-05, CON-06).
+//! supply moves only with PairMinted / PairMerged events. Since Phase 3, one sequence
+//! in four ends with the full settlement path (record, finalize, settle, prune,
+//! close_book, withdraw, redeem) and checks that every claim is paid (CON-05).
 //!
 //! `PROP_SEQUENCES` (default 10,000) sets the number of random sequences and
 //! `PROP_SEED` replays one failing sequence; every failure message prints its seed.
@@ -143,6 +144,7 @@ struct Stats {
     buy_no: u64,
     sell_no: u64,
     withdraws: u64,
+    settled: u64,
 }
 
 fn run_sequence(base: &World, seed: u64, steps: usize, st: &mut Stats) {
@@ -439,7 +441,86 @@ fn run_sequence(base: &World, seed: u64, steps: usize, st: &mut Stats) {
             "{ctx}: USDC not conserved after {label}"
         );
     }
+    if seed % SETTLE_EVERY == 0 {
+        settle_tail(&mut w, &mut rng, seed, total0, &owners);
+        st.settled += 1;
+    }
 }
+
+/// One sequence in `SETTLE_EVERY` ends with the whole settlement path (CON-05, MER-36):
+/// record and finalize a random close, settle both strikes, prune to empty, close the
+/// books, then every user withdraws and redeems everything. Afterwards no claim is left:
+/// accounted = 0 and both supplies are 0, the vault holds only donations, and USDC is
+/// conserved. Pause may be on: none of these steps is entry (D30).
+fn settle_tail(w: &mut World, rng: &mut Rng, seed: u64, total0: u64, owners: &[Pubkey]) {
+    let ctx = format!("PROP_SEED={seed} settlement");
+    // Below, at and above each strike (680, 700).
+    let cents = [67_500i64, 68_000, 69_000, 70_000, 71_000][rng.below(5) as usize];
+    w.env.close_with(Update::meta(px(cents), 0));
+    for m in w.markets.clone() {
+        let donated =
+            w.env.token_balance(&w.env.market(&m).vault) - w.env.market(&m).collateral_accounted;
+        w.env
+            .settle(&m)
+            .unwrap_or_else(|e| panic!("{ctx}: settle {:?}", e.err));
+        let s = snapshot(w, &m);
+        assert_eq!(check(&s), None, "{ctx}: invariants after settle");
+        let want = if cents * 1_000 >= w.env.market(&m).strike_cents as i64 * 1_000 {
+            Outcome::Yes
+        } else {
+            Outcome::No
+        };
+        assert_eq!(s.outcome, want, "{ctx}: outcome");
+        while w.env.book(&m).get().order_count > 0 {
+            w.env
+                .prune(&m, 32)
+                .unwrap_or_else(|e| panic!("{ctx}: prune {:?}", e.err));
+            w.env.assert_book_escrow(&m, owners);
+        }
+        w.env
+            .close_book(&m)
+            .unwrap_or_else(|e| panic!("{ctx}: close_book {:?}", e.err));
+        for u in &w.users {
+            w.env
+                .withdraw(u, &m)
+                .unwrap_or_else(|e| panic!("{ctx}: withdraw {:?}", e.err));
+            let (_, y, n) = w.env.balances(&u.pubkey(), &m);
+            if y + n > 0 {
+                w.env
+                    .redeem(u, &m, y, n)
+                    .unwrap_or_else(|e| panic!("{ctx}: redeem {:?}", e.err));
+            }
+            assert_eq!(
+                check(&snapshot(w, &m)),
+                None,
+                "{ctx}: invariants after redeem"
+            );
+        }
+        let mk = w.env.market(&m);
+        assert_eq!(mk.collateral_accounted, 0, "{ctx}: claims left");
+        assert_eq!(w.env.mint_info(&mk.yes_mint).supply, 0, "{ctx}: Yes left");
+        assert_eq!(w.env.mint_info(&mk.no_mint).supply, 0, "{ctx}: No left");
+        assert_eq!(
+            w.env.token_balance(&mk.vault),
+            donated,
+            "{ctx}: vault = donations"
+        );
+        assert_eq!(
+            w.env.token_balance(&seeded(QUOTE_VAULT_SEED, &m)),
+            0,
+            "{ctx}: book USDC left"
+        );
+        assert_eq!(
+            w.env.token_balance(&seeded(BASE_VAULT_SEED, &m)),
+            0,
+            "{ctx}: book Yes left"
+        );
+    }
+    assert_eq!(total_usdc(w), total0, "{ctx}: USDC not conserved");
+}
+
+/// Run the settlement tail on one sequence in this many.
+const SETTLE_EVERY: u64 = 4;
 
 #[test]
 fn inv_01_02_04_06_07_08_random_sequences() {
@@ -470,7 +551,8 @@ fn inv_01_02_04_06_07_08_random_sequences() {
                 && st.cancels > 0
                 && st.buy_no > 0
                 && st.sell_no > 0
-                && st.withdraws > 0,
+                && st.withdraws > 0
+                && st.settled > 0,
             "generator did not exercise every book path: {st:?}"
         );
     }
@@ -620,6 +702,10 @@ fn mnt_11_tokens_can_be_created_only_by_mint_paths() {
         include_str!("../src/instructions/pause.rs"),
         include_str!("../src/instructions/ticker_day.rs"),
         include_str!("../src/instructions/cancel_withdraw.rs"),
+        include_str!("../src/instructions/close.rs"),
+        include_str!("../src/instructions/settle.rs"),
+        include_str!("../src/instructions/cleanup.rs"),
+        include_str!("../src/settlement.rs"),
         include_str!("../src/book.rs"),
     ];
     for s in srcs {
@@ -928,4 +1014,34 @@ fn con_09_config_is_read_only_on_trade_paths() {
             .iter()
             .any(|x| x.pubkey == env.config().fee_vault));
     }
+}
+
+#[test]
+fn con_05_settle_and_redeem_race() {
+    // Both built against the FINAL-but-unsettled state, landing in one slot.
+    let (mut base, m) = Env::with_market();
+    base.warp(OPEN);
+    let alice = base.user(5 * USDC);
+    base.mint_pair(&alice, &m, 5).unwrap();
+    base.close_at(px(68_500));
+    let settle = base.ix_settle_market(&m);
+    let redeem = base.ix_redeem(&alice.pubkey(), &m, 5, 0);
+    let payer = base.payer.insecure_clone();
+
+    // Redeem first: fails cleanly, nothing paid; after settle lands it succeeds.
+    let mut env = base.fork();
+    assert_err(
+        env.send(std::slice::from_ref(&redeem), &[&alice]),
+        MeridianError::MarketNotSettled,
+    );
+    assert_eq!(env.balances(&alice.pubkey(), &m), (0, 5, 5));
+    env.send(std::slice::from_ref(&settle), &[&payer]).unwrap();
+    env.send(std::slice::from_ref(&redeem), &[&alice]).unwrap();
+    assert_eq!(env.balances(&alice.pubkey(), &m), (5 * USDC, 0, 5));
+
+    // Settle first: redeem pays in full.
+    let mut env = base.fork();
+    env.send(&[settle], &[&payer]).unwrap();
+    env.send(&[redeem], &[&alice]).unwrap();
+    assert_eq!(env.balances(&alice.pubkey(), &m), (5 * USDC, 0, 5));
 }

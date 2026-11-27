@@ -4,7 +4,9 @@
 //! mint/merge with accounted collateral, invariants, and pause.
 //! Phase 2 (order book): zero-copy CLOB with halt at close and the four trade paths
 //! (Buy Yes / Sell Yes via place_order, buy_no_market, buy_no_limit, sell_no), cancel,
-//! withdraw and the taker fee. Later phases add settlement, redeem and cleanup.
+//! withdraw and the taker fee.
+//! Phase 3 (settlement): record_close with the Pyth cross-check, admin override, the
+//! dispute window, per-strike settle, redeem, void, prune and close_book.
 use anchor_lang::prelude::*;
 
 pub mod book;
@@ -13,10 +15,12 @@ pub mod errors;
 pub mod events;
 pub mod instructions;
 pub mod invariants;
+pub mod settlement;
 pub mod state;
 
 use events::{Side, TimeInForce};
 use instructions::*;
+use state::Outcome;
 
 declare_id!("2U1R1Y6LNi9GoAp1TMo2JXssjxxnJe5iLf6g2PLzXmhL");
 
@@ -150,5 +154,67 @@ pub mod meridian {
     /// Admin only.
     pub fn unpause(ctx: Context<SetPaused>) -> Result<()> {
         instructions::pause::set_paused(ctx, false)
+    }
+
+    // ---- Phase 3: settlement, redeem, cleanup ----
+
+    /// Settler only. Records the official close (D3), cross-checked against a fully
+    /// verified Pyth update stamped in [close_time, close_time + settle_window_s].
+    /// `official` is required in ATTESTED_CHECKED mode and refused in ORACLE_OFFICIAL.
+    pub fn record_close(ctx: Context<RecordClose>, official: Option<OfficialClose>) -> Result<()> {
+        instructions::close::record_close(ctx, official)
+    }
+
+    /// Admin only, from close_time + override_delay_s while the close is unrecorded.
+    pub fn admin_settle(ctx: Context<AdminSettle>, price: i64, expo: i32) -> Result<()> {
+        instructions::close::admin_settle(ctx, price, expo)
+    }
+
+    /// Anyone, during the dispute window, with the configured USDC bond.
+    pub fn raise_dispute(ctx: Context<RaiseDispute>, evidence_hash: [u8; 32]) -> Result<()> {
+        instructions::close::raise_dispute(ctx, evidence_hash)
+    }
+
+    /// Admin only, before the resolution deadline. Uphold or correct (once).
+    pub fn resolve_dispute(ctx: Context<ResolveDispute>, resolution: Resolution) -> Result<()> {
+        instructions::close::resolve_dispute(ctx, resolution)
+    }
+
+    /// Permissionless. PROVISIONAL past the window, or DISPUTED past the deadline -> FINAL.
+    pub fn finalize_close(ctx: Context<FinalizeClose>) -> Result<()> {
+        instructions::close::finalize_close(ctx)
+    }
+
+    /// Permissionless. Settles one strike from its ticker-day's FINAL price.
+    pub fn settle_market(ctx: Context<SettleMarket>) -> Result<()> {
+        instructions::settle::settle_market(ctx)
+    }
+
+    /// Admin only. Settles a strike that settle_market refused (confidence band).
+    pub fn admin_settle_market(ctx: Context<AdminSettleMarket>, outcome: Outcome) -> Result<()> {
+        instructions::settle::admin_settle_market(ctx, outcome)
+    }
+
+    /// Admin only, zero trades. Yes and No each redeem for $0.50.
+    pub fn void_market(ctx: Context<VoidMarket>) -> Result<()> {
+        instructions::settle::void_market(ctx)
+    }
+
+    /// Burn tokens for their settled value. SETTLED or VOID; works forever.
+    pub fn redeem(ctx: Context<Redeem>, yes_n: u64, no_n: u64) -> Result<()> {
+        instructions::settle::redeem(ctx, yes_n, no_n)
+    }
+
+    /// Permissionless, after close_time. Cancels up to `max` resting orders to ledgers.
+    pub fn prune_orders<'info>(
+        ctx: Context<'_, '_, 'info, 'info, PruneOrders<'info>>,
+        max: u16,
+    ) -> Result<()> {
+        instructions::cleanup::prune_orders(ctx, max)
+    }
+
+    /// Permissionless. Closes an empty, settled book; rent to the automation wallet.
+    pub fn close_book(ctx: Context<CloseBook>) -> Result<()> {
+        instructions::cleanup::close_book(ctx)
     }
 }

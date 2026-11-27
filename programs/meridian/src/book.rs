@@ -153,7 +153,7 @@ impl OrderBook {
         Ok(())
     }
 
-    fn remove_at(&mut self, side: usize, price: u8, i: usize) -> BookOrder {
+    pub fn remove_at(&mut self, side: usize, price: u8, i: usize) -> BookOrder {
         let lvl = self.level_mut(side, price);
         let n = lvl.len as usize;
         let o = lvl.orders[i];
@@ -210,7 +210,13 @@ impl OrderBook {
         Ok((side, price, o))
     }
 
-    fn unlock(&mut self, side: usize, price: u8, o: &BookOrder, b: &mut Balances) -> Result<()> {
+    pub fn unlock(
+        &mut self,
+        side: usize,
+        price: u8,
+        o: &BookOrder,
+        b: &mut Balances,
+    ) -> Result<()> {
         if side == SIDE_BID {
             let amt = notional(price, o.qty)?;
             b.locked_usdc = sub(b.locked_usdc, amt)?;
@@ -267,6 +273,14 @@ impl OrderBook {
         b.free_yes = sub(b.free_yes, yes)?;
         self.total_free_usdc = sub(self.total_free_usdc, usdc)?;
         self.total_free_yes = sub(self.total_free_yes, yes)?;
+        Ok(())
+    }
+
+    /// Credits USDC to an owner's free balance (a pruned BUY_NO conversion, MER-35).
+    /// The caller moves the USDC into the quote vault.
+    pub fn credit_free_usdc(&mut self, b: &mut Balances, usdc: u64) -> Result<()> {
+        b.free_usdc = add(b.free_usdc, usdc)?;
+        self.total_free_usdc = add(self.total_free_usdc, usdc)?;
         Ok(())
     }
 
