@@ -5,3 +5,5 @@ test-ledger/
 *.so
 .env
 **/*-keypair.json
+services/*/dist/
+close-spike.csv

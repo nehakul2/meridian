@@ -4,7 +4,7 @@ ANCHOR_VERSION := 0.31.1
 PROGRAM_DIR    := programs/meridian
 IDL            := $(PROGRAM_DIR)/idl/meridian.json
 
-.PHONY: doctor build idl idl-check test test-quick prop fmt clippy
+.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build
 
 doctor:
 	@./scripts/doctor.sh $(SOLANA_VERSION) $(ANCHOR_VERSION)
@@ -37,3 +37,11 @@ fmt:
 
 clippy:
 	cargo clippy -p meridian --all-targets
+
+# Automation service (Phase 4). LiteSVM suites need the program built; Postgres suites start a
+# local cluster or use TEST_DATABASE_URL.
+automation-test: build
+	cd services/automation && npm ci && npm run typecheck && npm test
+
+automation-build:
+	cd services/automation && npm ci && npm run build
