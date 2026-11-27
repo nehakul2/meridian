@@ -11,7 +11,10 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned: on the newer ubuntu-latest image (glibc 2.43) Node 22 aborted with std::bad_alloc
+    # inside V8's minor GC (PretenuringHandler rehash) during the LiteSVM suites. 24.04 is the
+    # image the suite is developed and passes on.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       postgres:
