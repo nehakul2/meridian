@@ -1,0 +1,19 @@
+[toolchain]
+anchor_version = "0.31.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+meridian = "2U1R1Y6LNi9GoAp1TMo2JXssjxxnJe5iLf6g2PLzXmhL"
+
+[programs.devnet]
+meridian = "2U1R1Y6LNi9GoAp1TMo2JXssjxxnJe5iLf6g2PLzXmhL"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test -p meridian --test '*'"
