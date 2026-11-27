@@ -185,13 +185,18 @@ export class SvmEnv implements AccountReader, TxSender, PriceUpdatePoster {
     for (const ix of ixs) for (const k of ix.keys) this.seen.add(k.pubkey.toBase58());
     const res = this.svm.sendTransaction(tx);
     if (res instanceof FailedTransactionMetadata) {
+      // Read the error from the logs first and touch the native error objects only when the
+      // logs do not name it: on GitHub's runners, formatting a failed result (toString) aborted
+      // the Vitest worker with std::bad_alloc.
       const logs = res.meta().logs();
+      const fromLogs = parseProgramError(null, logs);
+      if (fromLogs) throw fromLogs;
       const err = res.err() as unknown as { err?: () => { code?: number } };
       const inner = typeof err.err === "function" ? err.err() : undefined;
       if (inner && typeof inner.code === "number") {
         throw parseProgramError({ InstructionError: [0, { Custom: inner.code }] }, logs)!;
       }
-      throw parseProgramError(new Error(res.toString()), logs) ?? new ChainError(`${res.toString()}\n${logs.join("\n")}`, false);
+      throw new ChainError(`transaction failed: ${String(err)}\n${logs.join("\n")}`, false);
     }
     return res;
   }
