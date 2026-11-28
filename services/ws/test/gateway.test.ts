@@ -209,7 +209,8 @@ describe("ws gateway", () => {
     const big = JSON.stringify({ type: "trade", seq: "1", price: 61, qty: 1, pad: "x".repeat(32 * 1024) });
     for (let k = 0; k < 400; k++) await redis.publish(K.ch.trades(M680), big);
     await sleep(300);
-    expect(gw.stats.dropped).toBe(1);
+    const subStatus = (gw as unknown as { o: { sub: { status: string } } }).o.sub.status;
+    expect(gw.stats.dropped, `stats=${JSON.stringify(gw.stats)} subStatus=${subStatus} slowBuffered=${slow.ws.bufferedAmount}`).toBe(1);
     expect(gw.connections).toBe(1);
     expect(fast.of("trade").length).toBe(400);
   });
@@ -228,7 +229,12 @@ describe("ws gateway", () => {
       receivers.push(await redis.publish(K.ch.trades(M680), JSON.stringify({ type: "warm" })));
       await sleep(20);
     }
-    expect(c.of("warm").length, diag()).toBeGreaterThan(0);
+    if (!c.of("warm").length) {
+      // CI-only failure (main runs 5-7): no Redis subscriber at all. Record what Redis and the gateway see.
+      const sub = (gw as unknown as { o: { sub: { status: string } } }).o.sub;
+      const list = String(await redis.client("LIST")).split("\n").map((l) => l.replace(/ (id|addr|laddr|fd|age|idle|qbuf|qbuf-free|argv-mem|multi-mem|rbs|rbp|obl|oll|tot-mem|events|user|redir|resp|lib-name|lib-ver|io-thread|watch|ssub)=\S*/g, "")).join("\n");
+      expect.fail(`${diag()} subStatus=${sub.status} numsub=${JSON.stringify(await redis.pubsub("NUMSUB", K.ch.trades(M680)))}\n${list}`);
+    }
     const sent: number[] = [];
     for (let k = 0; k < 100; k++) {
       sent.push(performance.now());
