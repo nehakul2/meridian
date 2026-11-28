@@ -5,7 +5,8 @@ always pays exactly $1.00; Yes pays if the official closing-auction price is at 
 the strike.
 
 Design docs (architecture spec, test case matrix, MER task breakdown) live in the project
-files, not in this repo. This repo follows their layout and naming: program tests are
+files, not in this repo. In this repo: [architecture rationale](docs/architecture.md),
+[risks and limitations](docs/risks.md) and [open questions with the defaults built](docs/open-questions.md). This repo follows their layout and naming: program tests are
 `programs/meridian/tests/<area>.rs` and every matrix case has a test named after it
 (for example `mnt_07_merge_burns_pairs_for_one_dollar_each`).
 
@@ -19,8 +20,10 @@ files, not in this repo. This repo follows their layout and naming: program test
 | 4 · Automation service | MER-40 to MER-49 | Built: calendar, dynamic strikes and frozen inputs, Hermes client, morning job, settler (two-vendor official close), finalize / strike / prune / close-book cranks, scheduler with single-runner lock, nightly reconcile. MER-48 spike script written, not yet run |
 | 5 · Indexer and PG Writer | MER-50 to MER-54 | Built: event decoder, `md:events` stream, Redis projector (book, BBO with the No view, markets, trades, ticker-days, open orders, positions), leader lease with failover and backfill, PG Writer (idempotent consumer, seq gap backfill, reorg rebuild, candles), positions with intent mapping and average-cost P&L |
 | 6 · REST API, Tx Builder, WebSocket | MER-60 to MER-65 | Built: REST reads from Redis with rate limits, SIWS sign-in and `/v1/me`, Tx Builder (intent map, position guards, 500 cap, unsigned v0 txs for trade, cancel, mint, merge, withdraw, redeem, dispute), admin routes returning unsigned multisig txs with an audit log, WebSocket gateway (book snapshots and deltas, trades, prices, user channel) |
+| 7 · Frontend | MER-70 to MER-76 | Built: Next.js static app with wallet connect and SIWS, markets, order book with the No view, trade panel for all four intents, portfolio with redeem, history and countdown; Playwright e2e against a stub backend |
+| 8 · Devnet, monitoring, docs, load | MER-80 to MER-83 | Built: devnet deploy, lifecycle and release-smoke scripts (tested on a LiteSVM stand-in; first devnet run pending keys), monitor with SLA and health alerts, rationale / risks / open-questions docs, nightly load harness with every budget passing. Load testing added a 32-fill cap per trade |
 
-See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md), [docs/phase4-coverage.md](docs/phase4-coverage.md), [docs/phase5-coverage.md](docs/phase5-coverage.md) and [docs/phase6-coverage.md](docs/phase6-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 6 also list their contract changes and the choices made where the spec was silent.
+See [docs/phase1-coverage.md](docs/phase1-coverage.md), [docs/phase2-coverage.md](docs/phase2-coverage.md), [docs/phase3-coverage.md](docs/phase3-coverage.md), [docs/phase4-coverage.md](docs/phase4-coverage.md), [docs/phase5-coverage.md](docs/phase5-coverage.md), [docs/phase6-coverage.md](docs/phase6-coverage.md), [docs/phase7-coverage.md](docs/phase7-coverage.md) and [docs/phase8-coverage.md](docs/phase8-coverage.md) for which matrix cases are covered and which halves wait for later phases. Phases 2 to 8 also list their contract changes and the choices made where the spec was silent.
 
 ## Quick start
 
@@ -98,6 +101,66 @@ node dist/ws/src/main.js                 # REDIS_URL, JWT_SECRET
 None of the three reads RPC on a request path: the API and gateway serve the `md:*` read model
 (Postgres only for history), and the Tx Builder takes its blockhash and lookup table from
 background caches. Each has a `Dockerfile` in its folder.
+
+### Frontend (Phase 7)
+
+```sh
+make app-dev                             # stub backend on :8787 and the Next dev server on :3000
+make app-test                            # typecheck, component tests, static build, Playwright
+```
+
+### Devnet (Phase 8)
+
+The scripts run on devnet only: they read the cluster's genesis hash and refuse anything else
+before generating a key or sending a transaction. You need:
+
+- a funded devnet wallet as `DEPLOYER_KEYPAIR` (about 15 SOL while the 1.07 MB program deploys;
+  most comes back),
+- the keypair for the program id in the committed IDL as `PROGRAM_KEYPAIR`, or a new one switched
+  in with `scripts/devnet/set-program-id.sh <keypair.json>` (rewrites `declare_id!`, `Anchor.toml`
+  and the IDL, then rebuilds).
+
+Role keys (admin, market creator, settler, automation payer) are generated under `.devnet/` on
+the first run and must be kept: Config records them.
+
+```sh
+make scripts-test        # all script steps on the LiteSVM stand-in, no network needed
+make deploy-devnet       # deploy, initialize Config and the test USDC mint, write deployments/devnet.json
+make lifecycle-devnet    # create, mint, all 4 trade paths, record the close from Pyth, settle, redeem; prints a report
+make release-devnet      # deploy + lifecycle; on failure redeploy the previous binary and open an issue
+```
+
+Run the lifecycle during US market hours: it settles from a real Pyth equity update stamped at
+the close it chooses, and those feeds publish only then. Reports go to `.devnet/reports/`. The
+`devnet-release` workflow runs the release smoke from GitHub with keys from the `devnet`
+environment's secrets.
+
+### Monitor (Phase 8)
+
+```sh
+make monitor-test                        # alert rules, dedupe, PAGE routing, collector on Postgres
+cd services/monitor && node dist/monitor/src/main.js   # DATABASE_URL, REDIS_URL, RPC_URL, PROGRAM_ID, WS_HEALTH_URLS, ONCALL_WEBHOOK_URL
+```
+
+Alerts go to the `alerts` table (INFO / WARN / PAGE), deduplicated per (code, symbol, date);
+PAGE alerts are posted once to the on-call webhook.
+
+### Load harness (Phase 8)
+
+```sh
+make load-test                           # every budget, ~1 min at LOAD_SCALE=1
+cd tests/load && LOAD_SCALE=5 npx vitest run   # the nightly size
+```
+
+It runs the program on LiteSVM with the real Indexer, PG Writer, API, Tx Builder and gateway in
+one process, asserts each budget and writes `tests/load/out/report.{json,md}`. It runs nightly in
+CI (`.github/workflows/load.yml`), not on pull requests.
+
+### Docs
+
+```sh
+make docs-test                           # README commands exist, internal links resolve, risks wording
+```
 
 ### Dependency pins
 

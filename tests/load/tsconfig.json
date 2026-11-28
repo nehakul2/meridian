@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "rootDir": "../..",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@solana/web3.js": ["./node_modules/@solana/web3.js/lib/index.d.ts"],
+      "@coral-xyz/anchor": ["./node_modules/@coral-xyz/anchor/dist/cjs/index.d.ts"],
+      "bn.js": ["./node_modules/@types/bn.js/index.d.ts"],
+      "@pythnetwork/pyth-solana-receiver": ["./node_modules/@pythnetwork/pyth-solana-receiver/lib/index.d.ts"],
+      "fastify": ["./node_modules/fastify/fastify.d.ts"],
+      "ioredis": ["./node_modules/ioredis/built/index.d.ts"],
+      "pg": ["./node_modules/@types/pg/index.d.ts"],
+      "ws": ["./node_modules/@types/ws/index.d.ts"],
+      "litesvm": ["./node_modules/litesvm/dist/index.d.ts"]
+    }
+  },
+  "include": ["*.ts"]
+}

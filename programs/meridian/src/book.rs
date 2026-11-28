@@ -317,6 +317,8 @@ pub struct MatchOutcome {
     pub self_cancels: Vec<SelfCancel>,
     /// Matching stopped because a crossing maker's ledger was not passed.
     pub stopped: bool,
+    /// Matching stopped at MAX_FILLS_PER_IX with quantity left that could still cross.
+    pub capped: bool,
 }
 
 /// Matches a taker order against the opposite side, up to `qty` at `limit` or better.
@@ -354,6 +356,11 @@ pub fn match_taker<L: LedgerSet>(
             MAX_PRICE - step as u8
         };
         while remaining > 0 && book.level(maker_side, price).len > 0 {
+            if out.fills.len() + out.self_cancels.len() >= MAX_FILLS_PER_IX {
+                out.stopped = true;
+                out.capped = true;
+                break 'levels;
+            }
             let front = book.level(maker_side, price).orders[0];
             if front.owner == *taker {
                 let o = book.remove_at(maker_side, price, 0);

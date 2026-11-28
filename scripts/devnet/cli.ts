@@ -76,7 +76,7 @@ export async function main(argv: string[]): Promise<number> {
   const url = env("DEVNET_RPC_URL", "https://api.devnet.solana.com");
   const devnetDir = resolve(root, env("DEVNET_DIR", ".devnet"));
   const hermes = new HermesOracle({ baseUrl: env("HERMES_URL", "https://hermes.pyth.network") });
-  const deployerPath = env("DEPLOYER_KEYPAIR", join(homedir(), ".config/solana/id.json"));
+  const deployerPath = resolve(root, env("DEPLOYER_KEYPAIR", join(homedir(), ".config/solana/id.json")));
   const programKeypairPath = resolve(root, env("PROGRAM_KEYPAIR", "target/deploy/meridian-keypair.json"));
   const cluster = new RpcCluster(url, hermes, new SolanaCliDeployer({
     url, deployerKeypair: deployerPath, programKeypair: programKeypairPath, programId: PROGRAM_ID,

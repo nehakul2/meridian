@@ -666,3 +666,119 @@ fn order_placed_carries_tag_and_book_is_never_crossed() {
         "bid crossed and filled instead of resting"
     );
 }
+
+/// One maker resting `n` one-lot asks from 60 up, eight per level (LEVEL_CAPACITY).
+fn deep_asks(env: &mut Env, m: &Pubkey, n: u64) -> Keypair {
+    let bob = env.user_with_yes(m, 0, n);
+    for i in 0..n {
+        env.ask(&bob, m, 60 + (i / LEVEL_CAPACITY as u64) as u8, 1, Gtc)
+            .unwrap();
+    }
+    bob
+}
+
+#[test]
+fn scl_06_ioc_sweep_stops_at_the_fill_cap_with_a_partial_fill() {
+    let (mut env, m) = open();
+    deep_asks(&mut env, &m, 40);
+    let alice = env.user(1_000 * USDC);
+    let meta = env
+        .send(
+            &[
+                budget(1_400_000),
+                env.ix_trade_auto(
+                    &alice.pubkey(),
+                    &m,
+                    &TradeIx::Place {
+                        side: Side::Bid,
+                        price: 70,
+                        qty: 40,
+                        tif: Ioc,
+                    },
+                ),
+            ],
+            &[&alice],
+        )
+        .unwrap();
+    let fills = events::<Fill>(&meta);
+    assert_eq!(fills.len(), MAX_FILLS_PER_IX);
+    assert_eq!(yes_of(&env, &alice, &m), MAX_FILLS_PER_IX as u64);
+    let c = events::<OrderCancelled>(&meta);
+    assert_eq!((c[0].reason, c[0].qty), (CancelReason::IocRemainder, 8));
+    assert_eq!(
+        env.book(&m).get().order_count,
+        8,
+        "the rest stays on the book"
+    );
+    println!(
+        "fill cap: {} CU for {} fills",
+        meta.compute_units_consumed,
+        fills.len()
+    );
+}
+
+#[test]
+fn scl_06_gtc_that_would_still_cross_after_the_cap_is_refused() {
+    let (mut env, m) = open();
+    deep_asks(&mut env, &m, 40);
+    let alice = env.user(1_000 * USDC);
+    let ix = env.ix_trade_auto(
+        &alice.pubkey(),
+        &m,
+        &TradeIx::Place {
+            side: Side::Bid,
+            price: 70,
+            qty: 40,
+            tif: Gtc,
+        },
+    );
+    assert_err(
+        env.send(&[budget(1_400_000), ix], &[&alice]),
+        MeridianError::FillLimitReached,
+    );
+    assert_eq!(env.book(&m).get().order_count, 40, "nothing changed");
+
+    // Exactly the cap fills in full, and a GTC whose leftover no longer crosses rests.
+    let meta = env
+        .send(
+            &[
+                budget(1_400_000),
+                env.ix_trade_auto(
+                    &alice.pubkey(),
+                    &m,
+                    &TradeIx::Place {
+                        side: Side::Bid,
+                        price: 63,
+                        qty: 32,
+                        tif: Gtc,
+                    },
+                ),
+            ],
+            &[&alice],
+        )
+        .unwrap();
+    assert_eq!(events::<Fill>(&meta).len(), 32);
+    assert!(events::<OrderPlaced>(&meta).is_empty());
+}
+
+#[test]
+fn scl_06_buy_no_market_is_capped_too() {
+    let (mut env, m) = open();
+    let bob = env.user(1_000 * USDC);
+    for i in 0..40u64 {
+        env.bid(&bob, &m, 40 - (i / LEVEL_CAPACITY as u64) as u8, 1, Gtc)
+            .unwrap();
+    }
+    let alice = env.user(1_000 * USDC);
+    let ix = env.ix_trade_auto(
+        &alice.pubkey(),
+        &m,
+        &TradeIx::BuyNoMarket {
+            qty: 40,
+            min_yes: 1,
+        },
+    );
+    let meta = env.send(&[budget(1_400_000), ix], &[&alice]).unwrap();
+    assert_eq!(events::<Fill>(&meta).len(), MAX_FILLS_PER_IX);
+    assert_eq!(env.balances(&alice.pubkey(), &m).2, 32);
+}

@@ -9,7 +9,7 @@ import {
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Clock as SvmClock, FailedTransactionMetadata, LiteSVM } from "litesvm";
+import { Clock as SvmClock, FailedTransactionMetadata, LiteSVM, TransactionMetadata } from "litesvm";
 import { AccountReader, ChainError, parseProgramError, RawAccount, SendOpts, TxSender } from "../../../services/automation/src/chain/client.js";
 import { coder, IDL, PROGRAM_ID } from "../../../services/automation/src/chain/idl.js";
 import { PYTH_RECEIVER_ID } from "../../../services/automation/src/chain/pdas.js";
@@ -72,6 +72,8 @@ export class SvmCluster implements Cluster, AccountReader, TxSender, PriceUpdate
   readonly deployments: Buffer[] = [];
   /** Fail the next transaction containing this instruction name (DLC-05 "merge that breaks redeem"). */
   breakInstruction: string | null = null;
+  /** Called with every landed transaction (the load harness feeds the Indexer from it). */
+  onLanded: ((tx: Transaction, res: TransactionMetadata) => void) | null = null;
   private readonly seen = new Set<string>();
   t: number;
 
@@ -178,6 +180,7 @@ export class SvmCluster implements Cluster, AccountReader, TxSender, PriceUpdate
       if (inner && typeof inner.code === "number") throw parseProgramError({ InstructionError: [0, { Custom: inner.code }] }, logs)!;
       throw new ChainError(`transaction failed: ${String(err)}\n${logs.join("\n")}`, false);
     }
+    this.onLanded?.(tx, res);
     return Buffer.from(res.signature()).toString("hex").slice(0, 32);
   }
 

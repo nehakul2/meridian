@@ -40,6 +40,8 @@ export interface TxbDeps {
 
 export const MAX_TX_BYTES = 1232;
 const INTENTS = ["BUY_YES", "SELL_YES", "BUY_NO", "SELL_NO"] as const;
+/** Mirrors programs/meridian/src/constants.rs MAX_FILLS_PER_IX. */
+export const MAX_FILLS_PER_IX = 32;
 const ORDER_TYPES = ["MARKET", "LIMIT", "POST_ONLY"] as const;
 
 interface Market extends MarketKeys {
@@ -226,6 +228,18 @@ export async function buildTxb(deps: TxbDeps): Promise<FastifyInstance> {
       .map((x) => ({ ...x, self: x.owner === taker }));
   }
 
+  /** Resting orders (own ones included: each self-cancel counts) the taker would consume. */
+  function fillsNeeded(cross: ReturnType<typeof crossing>, qty: bigint): number {
+    let left = qty;
+    let n = 0;
+    for (const x of cross) {
+      if (left <= 0n) break;
+      n++;
+      if (!x.self) left -= x.qty;
+    }
+    return n;
+  }
+
   function makersFor(cross: ReturnType<typeof crossing>, qty: bigint, spare = 2): PublicKey[] {
     const out: string[] = [];
     let covered = 0n;
@@ -295,6 +309,19 @@ export async function buildTxb(deps: TxbDeps): Promise<FastifyInstance> {
     if (type === "POST_ONLY" && crossing(orders, takerSide, yesPrice, ownerS).some((x) => !x.self)) {
       throw new ApiError("VALIDATION", "A POST_ONLY order at this price would cross the book", { field: "priceCents" });
     }
+    // The program fills at most MAX_FILLS_PER_IX resting orders per trade (heap bound,
+    // docs/phase8-coverage.md). An IOC stops there; a resting order that would still cross
+    // is refused on-chain with FillLimitReached, so refuse it here first.
+    const fills = fillsNeeded(cross, qty);
+    if (fills > MAX_FILLS_PER_IX) {
+      if (type === "MARKET") {
+        if (!warnings.includes("PARTIAL_FILL_LIKELY")) warnings.push("PARTIAL_FILL_LIKELY");
+      } else {
+        throw new ApiError("ORDER_TOO_LARGE", `This order would fill more than ${MAX_FILLS_PER_IX} resting orders at once; reduce the size or send it as a market order`, {
+          reason: "FILL_LIMIT", maxFills: MAX_FILLS_PER_IX, fills,
+        });
+      }
+    }
     let makers = makersFor(cross, qty);
 
     const notional = qty * BigInt(p) * 10_000n;
@@ -322,7 +349,7 @@ export async function buildTxb(deps: TxbDeps): Promise<FastifyInstance> {
     const alt = deps.alts.get(m.symbol, m.date);
     let built: { tx: VersionedTransaction; size: number };
     for (;;) {
-      const cu = ComputeBudgetProgram.setComputeUnitLimit({ units: Math.min(1_400_000, 200_000 + 60_000 * (makers.length + ixs.length)) });
+      const cu = ComputeBudgetProgram.setComputeUnitLimit({ units: Math.min(1_400_000, 200_000 + 60_000 * (makers.length + ixs.length) + 10_000 * Math.min(fills, MAX_FILLS_PER_IX)) });
       built = compile(o, [cu, ...ixs, tradeIx(makers)], alt);
       if (built.size <= MAX_TX_BYTES) break;
       if (makers.length === 0) throw new ApiError("VALIDATION", "Transaction too large", { bytes: built.size });

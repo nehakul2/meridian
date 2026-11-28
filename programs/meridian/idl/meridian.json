@@ -5449,6 +5449,11 @@
       "code": 6057,
       "name": "BookClosed",
       "msg": "Order book account is closed"
+    },
+    {
+      "code": 6058,
+      "name": "FillLimitReached",
+      "msg": "Order would fill more than 32 resting orders in one transaction; split it or send it as IOC"
     }
   ],
   "types": [
