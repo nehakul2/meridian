@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "..",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@solana/web3.js": ["./node_modules/@solana/web3.js/lib/index.d.ts"],
+      "@coral-xyz/anchor": ["./node_modules/@coral-xyz/anchor/dist/cjs/index.d.ts"],
+      "bn.js": ["./node_modules/@types/bn.js/index.d.ts"],
+      "@pythnetwork/pyth-solana-receiver": ["./node_modules/@pythnetwork/pyth-solana-receiver/lib/index.d.ts"]
+    }
+  },
+  "include": ["devnet", "__tests__", "vitest.config.ts"]
+}

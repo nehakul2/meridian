@@ -242,6 +242,15 @@ describe("ws gateway", () => {
     expect(lat[94]!).toBeLessThan(50);
   });
 
+  it("serves /healthz counters for the Monitor (MER-81)", async () => {
+    if (!r) return;
+    const c = await client();
+    await sleep(20);
+    const h = await (await fetch(url.replace("ws://", "http://").replace("/v1/ws", "/healthz"))).json();
+    expect(h).toMatchObject({ ok: true, connections: 1, errors: 0, dropped: 0 });
+    c.close();
+  });
+
   it("rejects unknown ops, channels and non-JSON with an error message, and keeps the connection", async () => {
     if (!r) return;
     const c = await client();
