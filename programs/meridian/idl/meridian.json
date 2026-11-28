@@ -1,5 +1,5 @@
 {
-  "address": "2U1R1Y6LNi9GoAp1TMo2JXssjxxnJe5iLf6g2PLzXmhL",
+  "address": "LAsZhW497YdYdPcpNrjhM5FkJdQiLe4ogrgVAttRvix",
   "metadata": {
     "name": "meridian",
     "version": "0.1.0",
@@ -2258,7 +2258,7 @@
         },
         {
           "name": "program",
-          "address": "2U1R1Y6LNi9GoAp1TMo2JXssjxxnJe5iLf6g2PLzXmhL"
+          "address": "LAsZhW497YdYdPcpNrjhM5FkJdQiLe4ogrgVAttRvix"
         },
         {
           "name": "program_data"

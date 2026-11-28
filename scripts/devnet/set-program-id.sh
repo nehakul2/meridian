@@ -7,7 +7,9 @@ set -euo pipefail
 kp="${1:?usage: set-program-id.sh <program-keypair.json>}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 new="$(solana-keygen pubkey "$kp")"
-old="$(grep -oP 'declare_id!\("\K[1-9A-HJ-NP-Za-km-z]+' "$root/programs/meridian/src/lib.rs")"
+# sed, not grep -P: macOS grep has no -P.
+old="$(sed -nE 's/.*declare_id!\("([1-9A-HJ-NP-Za-km-z]+)"\).*/\1/p' "$root/programs/meridian/src/lib.rs")"
+[ -n "$old" ] || { echo "declare_id! not found in programs/meridian/src/lib.rs" >&2; exit 1; }
 [ "$old" = "$new" ] && { echo "program id already $new"; exit 0; }
 grep -rl "$old" "$root/programs/meridian/src/lib.rs" "$root/Anchor.toml" "$root/programs/meridian/idl/meridian.json" \
   | xargs sed -i.bak "s/$old/$new/g"

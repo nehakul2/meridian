@@ -22,7 +22,7 @@ use events::{Side, TimeInForce};
 use instructions::*;
 use state::Outcome;
 
-declare_id!("2U1R1Y6LNi9GoAp1TMo2JXssjxxnJe5iLf6g2PLzXmhL");
+declare_id!("LAsZhW497YdYdPcpNrjhM5FkJdQiLe4ogrgVAttRvix");
 
 #[program]
 pub mod meridian {
