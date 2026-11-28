@@ -57,6 +57,11 @@ pub const LEVEL_CAPACITY: usize = 8;
 /// On-chain ceiling on one order's size. The 500-contract product cap (D6) is enforced by
 /// the Tx Builder; this bound keeps every notional far from u64 overflow.
 pub const MAX_ORDER_QTY: u64 = 1_000_000;
+/// Resting orders one taker instruction may fill (or self-cancel). Each fill emits an event
+/// through a CPI that allocates on the 32 KiB bump heap, which ran out at ~50 fills (found by
+/// the Phase 8 load harness, SCL-06). Matching stops here: an IOC remainder is dropped as a
+/// partial fill; a resting order that would still cross is refused with FillLimitReached.
+pub const MAX_FILLS_PER_IX: usize = 32;
 /// A program-owned account can grow by at most 10 KiB per instruction, so the book is
 /// created at this size and grown to full size by `grow_book` (MER-20).
 pub const BOOK_GROWTH_STEP: usize = 10_240;

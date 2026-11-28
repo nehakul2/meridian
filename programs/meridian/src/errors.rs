@@ -119,4 +119,6 @@ pub enum MeridianError {
     BookNotEmpty,
     #[msg("Order book account is closed")]
     BookClosed,
+    #[msg("Order would fill more than 32 resting orders in one transaction; split it or send it as IOC")]
+    FillLimitReached,
 }

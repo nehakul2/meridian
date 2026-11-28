@@ -1,0 +1,76 @@
+name: devnet-release
+
+# MER-80 release smoke: dump the live devnet binary, deploy this commit, run the full
+# lifecycle, and on failure redeploy the previous binary and open a bug issue.
+# Manual only, and only for the devnet environment. Run during US market hours: the
+# lifecycle settles from a real Pyth equity update, which is published only then.
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: Ticker for the smoke market
+        default: AAPL
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SOLANA_VERSION: v2.3.13
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: devnet
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Solana CLI
+        run: |
+          curl -sSfL -o /tmp/solana.tar.bz2 "https://github.com/anza-xyz/agave/releases/download/${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          tar xjf /tmp/solana.tar.bz2 -C ~
+          echo "$HOME/solana-release/bin" >> "$GITHUB_PATH"
+      - run: make build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: scripts
+      # Keys come from the devnet environment's secrets. Role keys must stay the same across
+      # runs because Config records them (D23).
+      - name: Write keys
+        env:
+          DEPLOYER: ${{ secrets.DEVNET_DEPLOYER_KEYPAIR }}
+          PROGRAM: ${{ secrets.DEVNET_PROGRAM_KEYPAIR }}
+          ADMIN: ${{ secrets.DEVNET_ADMIN_KEYPAIR }}
+          CREATOR: ${{ secrets.DEVNET_MARKET_CREATOR_KEYPAIR }}
+          SETTLER: ${{ secrets.DEVNET_SETTLER_KEYPAIR }}
+          PAYER: ${{ secrets.DEVNET_AUTOMATION_PAYER_KEYPAIR }}
+        run: |
+          umask 077
+          mkdir -p .devnet
+          printf '%s' "$DEPLOYER" > .devnet/deployer.json
+          printf '%s' "$PROGRAM" > .devnet/program.json
+          printf '%s' "$ADMIN" > .devnet/admin.json
+          printf '%s' "$CREATOR" > .devnet/market-creator.json
+          printf '%s' "$SETTLER" > .devnet/settler.json
+          printf '%s' "$PAYER" > .devnet/automation-payer.json
+      - name: Release smoke
+        run: make release-devnet
+        env:
+          DEVNET_RPC_URL: ${{ vars.DEVNET_RPC_URL || 'https://api.devnet.solana.com' }}
+          DEPLOYER_KEYPAIR: .devnet/deployer.json
+          PROGRAM_KEYPAIR: .devnet/program.json
+          TICKER: ${{ inputs.ticker }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: devnet-report
+          path: |
+            .devnet/reports/
+            deployments/devnet.json

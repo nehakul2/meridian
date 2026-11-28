@@ -7,3 +7,7 @@ test-ledger/
 **/*-keypair.json
 services/*/dist/
 close-spike.csv
+.devnet/
+scripts/dist/
+tests/load/out/
+services/monitor/dist/

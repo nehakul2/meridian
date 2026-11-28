@@ -136,13 +136,16 @@ export async function marketRoutes(app: FastifyInstance, ctx: Ctx) {
       p.hget(K.tday(t, d), "status");
     }
     const res = (await p.exec())!;
-    const prev = await prevCloses(d);
+    const idsOf = ctx.tickers.map((_, i) => res[3 * i + 1]![1] as string[]);
+    // One round trip for every ticker's markets (MER-83 found seven sequential reads here).
+    const [prev, all] = await Promise.all([prevCloses(d), readMarkets(ctx.redis, idsOf.flat())]);
     const out = [];
+    let at = 0;
     for (const [i, t] of ctx.tickers.entries()) {
       const px = res[3 * i]![1] as Record<string, string>;
-      const ids = res[3 * i + 1]![1] as string[];
+      const ids = idsOf[i]!;
       const st = res[3 * i + 2]![1] as string | null;
-      const rows = await readMarkets(ctx.redis, ids);
+      const rows = all.slice(at, (at += ids.length));
       const active = rows.filter((r) => r && marketJson(r, now).status === "TRADING").length;
       out.push({
         symbol: t,

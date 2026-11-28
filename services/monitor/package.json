@@ -1,0 +1,26 @@
+{
+  "name": "@meridian/monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Meridian Monitor (C9): SLA and health alert rules over Postgres, Redis, RPC and the WS gateway",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/monitor/src/main.js"
+  },
+  "dependencies": {
+    "ioredis": "^5.8.2",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

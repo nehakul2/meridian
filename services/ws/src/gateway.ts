@@ -59,20 +59,40 @@ export class Gateway {
   private readonly routes = new Map<string, Set<Conn>>();
   private readonly subscribing = new Map<string, Promise<unknown>>();
   private heartbeat: NodeJS.Timeout | null = null;
-  readonly stats = { dropped: 0, forwarded: 0, snapshots: 0 };
+  /** Counters served on GET /healthz for the Monitor (MER-81): `errors` counts failed client ops and socket errors. */
+  readonly stats = { dropped: 0, forwarded: 0, snapshots: 0, errors: 0, subReconnects: 0 };
+  private readonly startedAt = Date.now();
   private readonly o: Required<Omit<GatewayOptions, "log">> & Pick<GatewayOptions, "log">;
 
   constructor(o: GatewayOptions) {
     this.o = {
       now: () => Date.now(), heartbeatMs: 15_000, maxBufferedBytes: 1 << 20, pxIntervalMs: 250, maxSubscriptions: 200, ...o,
     };
-    this.server = createServer((_req, res) => {
+    this.server = createServer((req, res) => {
+      if (req.method === "GET" && req.url === "/healthz") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: this.o.sub.status === "ready", connections: this.conns.size, ...this.stats, startedAt: this.startedAt }));
+        return;
+      }
       res.writeHead(426, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { code: "VALIDATION", message: "WebSocket upgrade required", details: {} } }));
     });
     this.wss = new WebSocketServer({ server: this.server, path: "/v1/ws", maxPayload: 16 * 1024 });
     this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
     this.o.sub.on("message", (ch: string, msg: string) => this.onRedis(ch, msg));
+    // After the subscriber connection drops and reconnects, subscribe again to every channel
+    // with listeners. ioredis's own resubscribe was seen not to happen on CI (the server listed
+    // the reconnected client with no subscriptions while it reported "ready"), and a gateway
+    // that silently stops forwarding is the worst failure it can have. SUBSCRIBE is idempotent.
+    let first = true;
+    this.o.sub.on("ready", () => {
+      if (first) {
+        first = false;
+        if (this.routes.size === 0) return;
+      } else this.stats.subReconnects++;
+      const chans = [...this.routes.keys()];
+      if (chans.length > 0) void this.o.sub.subscribe(...chans).catch((e) => this.o.log?.warn("resubscribe failed", { e: String(e) }));
+    });
   }
 
   async listen(port: number, host = "0.0.0.0"): Promise<number> {
@@ -99,9 +119,15 @@ export class Gateway {
   private onConnection(ws: WebSocket, _req: IncomingMessage) {
     const c: Conn = { ws, owner: null, subs: new Set(), bookSeq: new Map(), pending: new Map(), px: new Map() };
     this.conns.add(c);
-    ws.on("message", (raw) => void this.onClient(c, raw.toString()).catch((e) => this.o.log?.warn("ws op failed", { e: String(e) })));
+    ws.on("message", (raw) => void this.onClient(c, raw.toString()).catch((e) => {
+      this.stats.errors++;
+      this.o.log?.warn("ws op failed", { e: String(e) });
+    }));
     ws.on("close", () => this.drop(c));
-    ws.on("error", () => this.drop(c));
+    ws.on("error", () => {
+      this.stats.errors++;
+      this.drop(c);
+    });
   }
 
   private drop(c: Conn) {

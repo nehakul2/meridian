@@ -245,8 +245,15 @@ fn run_match<'info>(
     let left = qty - out.filled;
     let mut rested = 0;
     if left > 0 && rest == Rest::Yes {
-        // Only possible after matching stopped at a missing maker ledger.
-        require!(!bk.crosses(side, price), MeridianError::MakerLedgerMissing);
+        // Only possible after matching stopped at a missing maker ledger or the fill cap.
+        require!(
+            !bk.crosses(side, price),
+            if out.capped {
+                MeridianError::FillLimitReached
+            } else {
+                MeridianError::MakerLedgerMissing
+            }
+        );
         let o = BookOrder {
             owner: user,
             order_id,

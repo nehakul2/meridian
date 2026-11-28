@@ -4,7 +4,8 @@ ANCHOR_VERSION := 0.31.1
 PROGRAM_DIR    := programs/meridian
 IDL            := $(PROGRAM_DIR)/idl/meridian.json
 
-.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test api-test app-dev app-test
+.PHONY: doctor build idl idl-check test test-quick prop fmt clippy automation-test automation-build data-test api-test app-dev app-test \
+	scripts-build scripts-test deploy-devnet lifecycle-devnet release-devnet monitor-test load-test docs-test
 
 doctor:
 	@./scripts/doctor.sh $(SOLANA_VERSION) $(ANCHOR_VERSION)
@@ -64,3 +65,34 @@ app-dev:
 
 app-test:
 	cd app && npm ci && npm run typecheck && npm test && npx next build && npx playwright test e2e/frontend.spec.ts
+
+# Devnet (Phase 8). Devnet only: the scripts check the cluster's genesis hash and refuse
+# anything else. Needs DEPLOYER_KEYPAIR (a funded devnet wallet) and PROGRAM_KEYPAIR (the
+# keypair for the program id in the IDL); see README "Devnet".
+scripts-build:
+	cd scripts && npm ci && npm run build
+
+scripts-test: build
+	cd scripts && npm ci && npm run typecheck && npm test
+
+deploy-devnet: build scripts-build
+	cd scripts && npm run devnet -- deploy
+
+# Run during US market hours: settlement uses a real Pyth equity update at the chosen close.
+lifecycle-devnet: scripts-build
+	cd scripts && npm run devnet -- lifecycle
+
+# Deploy + lifecycle; on a failed smoke, redeploy the previous binary and open a bug issue.
+release-devnet: build scripts-build
+	cd scripts && npm run devnet -- release
+
+monitor-test:
+	cd services/monitor && npm ci && npm run typecheck && npm test
+
+# Load and scale harness (MER-83). Nightly in CI; LOAD_SCALE=5 for the nightly size.
+load-test: build
+	for d in tests/load scripts services/automation services/indexer services/pg-writer services/api services/txb services/ws; do (cd $$d && npm ci) || exit 1; done
+	cd tests/load && npx vitest run
+
+docs-test:
+	cd docs && npm ci && npm test

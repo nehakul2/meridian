@@ -361,4 +361,24 @@ describe.skipIf(!haveProgram)("intent map", () => {
     expect(yesOf(alice)).toBe(BigInt(50 + passed.length - 1));
     expect(new PublicKey(passed[0]!)).toBeTruthy();
   });
+  it("SCL-06 more than 32 resting orders: MARKET builds with PARTIAL_FILL_LIKELY and fills 32; LIMIT is 422 ORDER_TOO_LARGE (FILL_LIMIT)", async () => {
+    if (!r) return;
+    const mm = e.svm.user("deep", 100n * USDC);
+    e.svm.mint(mm, e.m, 40n);
+    for (let i = 0; i < 40; i++) e.svm.place(mm, e.m, "ask", 70 + Math.floor(i / 8), 1n);
+    const alice = e.svm.user("alice", 1_000n * USDC);
+    await sync();
+    // bob's 50 @ 64 plus 40 one-lot asks: 41 resting orders.
+    const limit = await post(e.app, "/v1/tx/trade", trade(alice, e.mid, "BUY_YES", "LIMIT", 90, 79));
+    expect(limit.status).toBe(422);
+    expect(limit.body.error.code).toBe("ORDER_TOO_LARGE");
+    expect(limit.body.error.details).toMatchObject({ reason: "FILL_LIMIT", maxFills: 32, fills: 41 });
+    const ok = await post(e.app, "/v1/tx/trade", trade(alice, e.mid, "BUY_YES", "LIMIT", 81, 79));
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200); // 32 orders exactly
+    const mkt = await post(e.app, "/v1/tx/trade", trade(alice, e.mid, "BUY_YES", "MARKET", 90, 79));
+    expect(mkt.status, JSON.stringify(mkt.body)).toBe(200);
+    expect(mkt.body.warnings).toContain("PARTIAL_FILL_LIKELY");
+    expect(e.svm.signAndSend(mkt.body.transaction, alice).ok).toBe(true);
+    expect(yesOf(alice)).toBe(50n + 31n);
+  });
 });

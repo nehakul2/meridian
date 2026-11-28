@@ -1,0 +1,24 @@
+name: docs
+
+# MER-82: README commands exist, internal links resolve, risks wording.
+on:
+  pull_request:
+    paths: ["README.md", "docs/**", "Makefile", "**/package.json", ".github/workflows/docs.yml"]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+        working-directory: docs
+      - run: npm test
+        working-directory: docs
