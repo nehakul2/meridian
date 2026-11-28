@@ -1,0 +1,33 @@
+{
+  "cluster": "devnet",
+  "programId": "LAsZhW497YdYdPcpNrjhM5FkJdQiLe4ogrgVAttRvix",
+  "idlSha256": "cb0d2167da0622fadb3735fb1536e690b8df15c5f1fe6ee984b68a42a206d18d",
+  "soSha256": "20b8e13ece080c9bc96178fd4a5f258531f29f1a7c7ef0b80df52c980145b8a4",
+  "commit": "a1594c5854c5d27fe9bc09286b38e6f9dc42e946",
+  "deployedAt": "2026-11-28T18:43:19.010Z",
+  "deploySignature": "3KX5adbyz1wh5W1Ta8uzKgkR6nghEzvkcoJyaBQN9TMRASaiomQjGVti33a7r3wLsdJwUTwPUWAwHhTRdL57xnRA",
+  "usdcMint": "GgZ2GXhxwdapMzGBAJ7gHr45PjmyG8LEBJZb4BxpcTaj",
+  "usdcMintAuthority": "8yoVZPQrCLHMBym3jJPM8y5W5iBe2KQSqjm1Uk67LDqh",
+  "feeVault": "ChvYn9hRrVsgf5ZfGN9CohLYdkqVyPns7NGHNeDj9nvp",
+  "bondVault": "5erPVJ3S8uTwn5qTqCisW3j4z1GYiQwRA72spdhm3YSb",
+  "roles": {
+    "admin": "FueZP8c22gCBAXpWgi9Qvya9juGKXzFp9smAyyVfPtwP",
+    "marketCreator": "5URS4gRfC7Wj5pSoA7moKFoiS8oHxERJBdHsNn5R3EvZ",
+    "settler": "FmqzDwVyq3WbUevWhXDrEw9oJ7eBjvzJE4StjBPDpiZN",
+    "payer": "8yoVZPQrCLHMBym3jJPM8y5W5iBe2KQSqjm1Uk67LDqh",
+    "upgradeAuthority": "2kzogfZcQYs7uDiUL6PfkpycATxgEk2JDmNCXtuzN7Sd"
+  },
+  "tickers": {
+    "AAPL": "49f6b65cb1de6b10eaf75e7c03ca029c306d0357e91b5311b175084a5ad55688",
+    "MSFT": "d0ca23c1cc005e004ccf1db5bf76aeb6a49218f43dac3d4b275e92de12ded4d1",
+    "GOOGL": "5a48c03e9b9cb337801073ed9d166817473697efff0d138874e0f6a33d6d5aa6",
+    "AMZN": "b5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a",
+    "NVDA": "b1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
+    "META": "78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe",
+    "TSLA": "16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1"
+  },
+  "settings": {
+    "disputeWindowS": 60,
+    "feeBps": 0
+  }
+}
