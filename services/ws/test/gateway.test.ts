@@ -248,6 +248,21 @@ describe("ws gateway", () => {
     expect(lat[94]!).toBeLessThan(50);
   });
 
+  it("keeps forwarding after the Redis subscriber connection is killed and reconnects", async () => {
+    if (!r) return;
+    const c = await client();
+    c.send({ op: "subscribe", channels: [`trades:${M680}`] });
+    await c.waitFor((m) => m.type === "subscribed");
+    await redis.client("KILL", "TYPE", "pubsub");
+    const t0 = Date.now();
+    while (Date.now() - t0 < 5_000 && !c.of("after").length) {
+      await redis.publish(K.ch.trades(M680), JSON.stringify({ type: "after" }));
+      await sleep(50);
+    }
+    expect(c.of("after").length, JSON.stringify(gw.stats)).toBeGreaterThan(0);
+    expect(gw.stats.subReconnects).toBeGreaterThanOrEqual(1);
+  });
+
   it("serves /healthz counters for the Monitor (MER-81)", async () => {
     if (!r) return;
     const c = await client();

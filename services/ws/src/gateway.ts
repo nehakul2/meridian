@@ -60,7 +60,7 @@ export class Gateway {
   private readonly subscribing = new Map<string, Promise<unknown>>();
   private heartbeat: NodeJS.Timeout | null = null;
   /** Counters served on GET /healthz for the Monitor (MER-81): `errors` counts failed client ops and socket errors. */
-  readonly stats = { dropped: 0, forwarded: 0, snapshots: 0, errors: 0 };
+  readonly stats = { dropped: 0, forwarded: 0, snapshots: 0, errors: 0, subReconnects: 0 };
   private readonly startedAt = Date.now();
   private readonly o: Required<Omit<GatewayOptions, "log">> & Pick<GatewayOptions, "log">;
 
@@ -80,6 +80,19 @@ export class Gateway {
     this.wss = new WebSocketServer({ server: this.server, path: "/v1/ws", maxPayload: 16 * 1024 });
     this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
     this.o.sub.on("message", (ch: string, msg: string) => this.onRedis(ch, msg));
+    // After the subscriber connection drops and reconnects, subscribe again to every channel
+    // with listeners. ioredis's own resubscribe was seen not to happen on CI (the server listed
+    // the reconnected client with no subscriptions while it reported "ready"), and a gateway
+    // that silently stops forwarding is the worst failure it can have. SUBSCRIBE is idempotent.
+    let first = true;
+    this.o.sub.on("ready", () => {
+      if (first) {
+        first = false;
+        if (this.routes.size === 0) return;
+      } else this.stats.subReconnects++;
+      const chans = [...this.routes.keys()];
+      if (chans.length > 0) void this.o.sub.subscribe(...chans).catch((e) => this.o.log?.warn("resubscribe failed", { e: String(e) }));
+    });
   }
 
   async listen(port: number, host = "0.0.0.0"): Promise<number> {
